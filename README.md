@@ -1,7 +1,7 @@
 # Evershade client mods
 
 Experimental ActionScript patches, launch tools and a local drop explorer for
-the Flash/AIR Evershade client. This is not the game distribution or a server.
+the Flash/AIR Evershade client. This is not a complete game distribution or a server.
 Use only where the server operator permits client modifications; automation can
 violate server rules. No feature guarantees survival or server compatibility.
 
@@ -19,12 +19,42 @@ violate server rules. No feature guarantees survival or server compatibility.
 - Offline searchable monster/drop catalog generated from your own client.
 - Connection diagnostics. HP/damage/debuff capture is **disabled**.
 
-No accounts, passwords, login stores, user presets, gameplay logs, game binaries,
-decompiled base sources, SDKs or extracted game assets are supplied. Changes are
-distributed as patches; you supply an authorized copy of the game. Third-party
+No accounts, passwords, login stores, user presets, gameplay logs, decompiled
+base sources or SDKs are supplied. Git contains patches and tools; GitHub Releases
+also provide a precompiled modified SWF. You supply an authorized matching game
+package and runtime. Third-party
 game code and assets remain their owners' property; no license to those is granted.
 
-## Requirements
+## Quick start with the precompiled SWF
+
+Download **Evershade.swf** from [Releases](https://github.com/mateogon/evershade-client-mods/releases).
+This skips compilation: you need Windows PowerShell and the AIR SDK, but not
+Node.js or JPEXS just to run it. Download this repository as a ZIP if you do not
+want to install Git either.
+
+1. Extract the matching original **2.1.17 hotfix** game package separately.
+   Verify its original `Evershade.swf` hash against the baseline below.
+2. Copy the contents of the game directory into this repository's `app/` folder,
+   preserving `META-INF/AIR/application.xml` and the rest of the package.
+3. Keep a backup of the original SWF outside `app/`. Replace `app/Evershade.swf`
+   with the release download, after verifying the release SHA-256.
+4. Set your SDK location and launch:
+
+```powershell
+$env:AIR_HOME = 'C:\Tools\AIRSDK'
+.\launch-mod.ps1
+```
+
+The release uses generic profile names, has health telemetry disabled, and does
+not include anyone's account or saved settings. Sign in normally. Do not launch
+the modified package with its captive EXE; use the ADL launcher above.
+
+**Updates:** this quick path does not create the decompiled merge baseline needed
+by `update-client.ps1`. Use a matching future prebuilt release, or initialize a
+separate source checkout using the full setup below before using the updater.
+Do not apply this SWF to arbitrary newer game packages.
+
+## Requirements for building and automatic updates
 
 Windows PowerShell, Git, Node.js, JPEXS FFDec **26.2.1**, and an AIR SDK compatible
 with application namespace **51.3** (tested with **51.3.4**).
