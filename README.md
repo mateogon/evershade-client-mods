@@ -1,204 +1,150 @@
-# Evershade client mods
+# Evershade Cheat Client
 
-Experimental ActionScript patches, launch tools and a local drop explorer for
-the Flash/AIR Evershade client. This is not a complete game distribution or a server.
-Use only where the server operator permits client modifications; automation can
-violate server rules. No feature guarantees survival or server compatibility.
+A cheat client for Flash/AIR Evershade: **godmode-style hit reduction, auto-nexus,
+auto-aim, auto-ability, auto-loot and multi-account following**.
+Configure cheats in **Options → Lab**.
 
-## What is included
+**[Download the SWF](https://github.com/mateogon/evershade-client-mods/releases)** ·
+**[Coding agent / contributor instructions](AGENTS.md)**
 
-- A **Lab** options tab with automatic/cone aiming, manual mouse override,
-  pre-shooting, targeted manual abilities and an automatic ability mode.
-- Nearby auto-loot with basic equipment tier filters, potion handling, storage
-  capacity checks and retry backoff. It does not walk to bags.
-- Optional auto-nexus and local projectile-hit reduction. The latter does **not**
-  prevent server damage, terrain, AoE, ability costs or self-debuff damage.
-- Three-profile launcher/grid placement, follower movement, native teleport
-  requests and conservative portal following. These use placeholder names;
-  configuring real accounts is a local-only advanced step described below.
-- Offline searchable monster/drop catalog generated from your own client.
-- Connection diagnostics. HP/damage/debuff capture is **disabled**.
+This is not an official client. Cheats can violate server rules and get accounts
+banned. No claim of undetectability, full invulnerability or guaranteed loot.
 
-No accounts, passwords, login stores, user presets, gameplay logs, decompiled
-base sources or SDKs are supplied. Git contains patches and tools; GitHub Releases
-also provide a precompiled modified SWF. You supply an authorized matching game
-package and runtime. Third-party
-game code and assets remain their owners' property; no license to those is granted.
+## Features
 
-## Quick start with the precompiled SWF
+| Feature | What it does |
+| --- | --- |
+| **Godmode / Reduce client hits** | Suppresses locally detected enemy projectile hits. **Not true invincibility:** server damage, AoE, lava, ability costs and self-debuffs can still hurt you. |
+| **Auto-nexus** | Escapes below a selected observed HP threshold: 20%, 25%, 35% or 50%. Cannot guarantee survival against lethal bursts or latency. |
+| **Auto-aim + auto-shoot** | Automatically targets and fires. Prioritizes clear shots within weapon range, then quest targets and maximum HP. Uses 20% extra range as fallback. Automatic or 15° cone mode. Holding the fire mouse button overrides it. |
+| **Pre-shoot** | Keeps firing at invulnerable targets so shots are already in flight when they become vulnerable. |
+| **Auto-ability** | Automatic casting or targeted casting on keypress. Respects native resource/cooldown checks. Charged and teleport abilities are excluded from automatic casting. |
+| **Auto-loot** | Collects eligible nearby items with minimum tiers for basic weapons/armor, abilities and rings. Special/untiered items remain eligible. **Does not walk to bags.** |
+| **Potion handling** | Fills HP/MP stacks when there is room. Uses recognized stat potions or stores them when maxed if storage has room. Backs off on failed requests. |
+| **Multi-client following** | Followers walk toward a configured leader, can request native teleport when stuck, and follow confirmed portal transitions. Requires local profile setup. |
+| **Window grid** | Arranges three profiles in a 2×2 grid without resizing them. |
+| **Drop explorer** | Search monsters, items, tiers and published drop probabilities from the client's local catalog. |
 
-Download **Evershade.swf** from [Releases](https://github.com/mateogon/evershade-client-mods/releases).
-This skips compilation: you need Windows PowerShell and the AIR SDK, but not
-Node.js or JPEXS just to run it. Download this repository as a ZIP if you do not
-want to install Git either.
+This release does **not** include a full autonomous farm/vault cycle, general
+obstacle pathfinding or the separate project's trained auto-dodge system.
 
-1. Extract the matching original **2.1.17 hotfix** game package separately.
-   Verify its original `Evershade.swf` hash against the baseline below.
-2. Copy the contents of the game directory into this repository's `app/` folder,
-   preserving `META-INF/AIR/application.xml` and the rest of the package.
-3. Keep a backup of the original SWF outside `app/`. Replace `app/Evershade.swf`
-   with the release download, after verifying the release SHA-256.
-4. Set your SDK location and launch:
+### Godmode settings
+
+In **Lab → Safety**, turn **Reduce client hits** ON, then choose:
+
+- **Always:** suppress local projectile hits regardless of HP or nearby players.
+- **Adaptive:** suppress them strictly below **Reduce hits HP %** (75–100%).
+- **Always reduce when alone:** in Adaptive mode, suppress at any HP when no other
+  loaded living player is within 15 tiles. Otherwise use the HP threshold.
+
+Followers and visually hidden players count as nearby. Adaptive at 100% is **not**
+Always: at exactly full HP, the threshold alone does not suppress hits.
+Neither mode prevents all damage.
+
+Auto-aim, auto-loot, follow, auto-nexus and hit reduction default OFF. Saved settings
+can override defaults. Auto-aim is inactive in Nexus/Vault. Manual ability aiming
+defaults ON; automatic casting is opt-in.
+
+## Play without compiling
+
+You need the **matching original game package**, the release SWF, these launcher
+scripts and the **Windows AIR SDK**. The SWF is not standalone.
+**AIR SDK Manager is unnecessary**: extract the SDK itself. The regular AIR runtime
+alone does not provide the development launcher used here.
+
+1. Download this repository as a ZIP, or clone it.
+2. Obtain the original **Evershade 2.1.17 hotfix** package and verify its original
+   SWF against the baseline hash below.
+3. Copy the game folder contents into this repository's `app/`, retaining all
+   supporting files, including `META-INF/AIR/application.xml`.
+4. Back up the original SWF outside `app/`. Download `Evershade.swf` from
+   [Releases](https://github.com/mateogon/evershade-client-mods/releases), verify
+   the release checksum, and replace `app/Evershade.swf`.
+5. Extract the [HARMAN AIR SDK](https://airsdk.harman.com/download), accept its
+   terms, and launch from PowerShell in the repository:
 
 ```powershell
 $env:AIR_HOME = 'C:\Tools\AIRSDK'
 .\launch-mod.ps1
 ```
 
-The release uses generic profile names, has health telemetry disabled, and does
-not include anyone's account or saved settings. Sign in normally. Do not launch
-the modified package with its captive EXE; use the ADL launcher above.
+Sign in normally. **No accounts, passwords or saved sessions are included.**
+No Node.js, JPEXS or Git is needed just to play the precompiled release.
+The captive game EXE may show an invalid-license warning with modified files;
+use our ADL launcher. We do not patch AIR licensing. Tested SDK: **51.3.4**.
 
-**Updates:** this quick path does not create the decompiled merge baseline needed
-by `update-client.ps1`. Use a matching future prebuilt release, or initialize a
-separate source checkout using the full setup below before using the updater.
-Do not apply this SWF to arbitrary newer game packages.
+Restart manually after replacing a SWF. An open client keeps its loaded code.
+The scripts do not close your clients or reset settings.
 
-## Requirements for building and automatic updates
+## Update the game
 
-Windows PowerShell, Git, Node.js, JPEXS FFDec **26.2.1**, and an AIR SDK compatible
-with application namespace **51.3** (tested with **51.3.4**).
+**Downloaded SWF:** use a release supporting the new game package. Keep a backup
+of the matching working package. Do not mix an old modified SWF with arbitrary
+new game files.
 
-- [JPEXS FFDec](https://github.com/jindrapetrik/jpexs-decompiler)
-- [HARMAN AIR SDK](https://airsdk.harman.com/download) — accept its terms yourself.
+**Local source build:** first initialize the [source setup](AGENTS.md#source-setup),
+then preview and inspect the update before installing:
 
-Initial setup requires **Evershade 2.1.17 hotfix**, with SWF SHA-256:
+```powershell
+.\update-client.ps1 -Zip 'C:\Downloads\Evershade-new.zip'
+# Review build/update-*/upstream-diff.txt, logs and staged sources.
+.\update-client.ps1 -Zip 'C:\Downloads\Evershade-new.zip' -Apply
+```
+
+The updater needs the original SWF and decompiled merge baseline. The precompiled
+quick start does **not** create those. `-Apply` reruns preparation, not the previous
+preview. Conflicts or failed checks stop installation; a clean merge still needs
+a live compatibility test.
+
+Keep the same AIR profile IDs to preserve sessions and presets. Backups contain
+sensitive SharedObjects and encrypted login stores—**never upload them**.
+The updater does not restore/overwrite AppData.
+See [update and recovery instructions](AGENTS.md#updating-the-game).
+
+## Multi-account follow
+
+Public profiles use placeholders: **LeaderPlayer**, **FollowerOne**, **FollowerTwo**.
+They are not accounts. Following requires a local rebuild with your character
+names; see [local profile customization](AGENTS.md#local-profile-customization).
+
+```powershell
+.\launch-clients.ps1
+# Or one profile; use your configured replacement name:
+.\launch-mod.ps1 -Profile LeaderPlayer
+```
+
+Enable Follow and optionally Follow portals on followers. **Comma** toggles follow;
+**period** on the leader requests follower teleports. Rebind keys in Lab → Movement.
+Teleport still obeys server cooldowns/restrictions. Manual movement takes priority.
+Obstacles or portal timeouts can stop following; it is not full pathfinding.
+Each profile has separate native settings/login storage. Sign in yourself once
+per profile; saved login does not automatically select a character or press Play.
+
+## Drop explorer
+
+After full source setup extracts the catalog:
+
+```powershell
+.\open-drops.ps1
+```
+
+Shows client-published base probabilities, not guaranteed server drops or boosted
+rates. The precompiled-only quick start does not extract the catalog.
+
+## Build, modify, or use a coding agent
+
+Read **[AGENTS.md](AGENTS.md)** for source locations, commands, update/compile/run
+workflows, tests, privacy rules and how to turn ignored local edits back into
+public patches. **[CLAUDE.md](CLAUDE.md)** points Claude Code to the same guide.
+For other agents, ask them to read AGENTS.md before making changes.
+
+Initial baseline: **2.1.17 hotfix**, original SWF SHA-256:
 
 ```text
 1DE66DA6D8A930B1D0E55FCA80FF82BD695354A7BDFBB2D862D511BEDAF5F8BC
 ```
 
-The version label alone is insufficient: two releases can share it. Setup checks
-the hash and fails on mismatches. If you only have a newer release, these patches
-need a reviewed port; the first setup is not an automatic arbitrary-version port.
-
-## First setup and launch
-
-Clone this repository, open PowerShell in its directory, and set tool locations:
-
-```powershell
-git clone https://github.com/mateogon/evershade-client-mods.git
-cd evershade-client-mods
-$env:AIR_HOME = 'C:\Tools\AIRSDK'
-$env:FFDEC_HOME = 'C:\Tools\ffdec'
-.\setup-client.ps1 -Zip 'C:\Downloads\Evershade.zip'
-.\launch-mod.ps1
-```
-
-Set those environment variables again in new shells, or configure them locally.
-If PowerShell blocks scripts, review them first and use a process-scoped policy
-consistent with your organization's rules; do not disable machine-wide security.
-
-Setup extracts and checks your ZIP, decompiles the original, applies six class
-patches, runs regression checks plus an offline AIR logger probe, compiles the
-modified SWF and generates the drop catalog. A failed setup can leave local
-intermediates: retry in a fresh clone after fixing the problem. It never imports
-accounts or launches the game automatically.
-
-Launch uses the official SDK's **ADL** with the game's AIR descriptor. Running the
-modified package through its captive executable may produce an invalid-license
-warning. This project does not patch AIR licensing.
-
-Log in normally using your own account. Open **Options → Lab** to configure the
-features; auto-aim, auto-loot, follow, auto-nexus and hit reduction default OFF.
-Existing native settings may override defaults. Save presets through the game's
-normal settings interface. Holding the fire mouse button overrides auto-aim.
-
-```powershell
-.\open-drops.ps1     # Generate/open the local monster drop explorer
-.\build-mod.ps1      # Recompile after editing local src-mod/*.as
-```
-
-Restart manually after replacing a SWF; an open client keeps its loaded code.
-Neither build nor update scripts close your clients.
-
-## Updating the game without losing settings
-
-Once setup works, keep the lab directory: its original SWF and decompiled sources
-are the merge baseline. Download a new official game ZIP separately. Close game
-windows normally first if you want their latest settings saved.
-
-```powershell
-# Prepare, back up, merge and test without installing:
-.\update-client.ps1 -Zip 'C:\Downloads\Evershade-new.zip'
-
-# Review build/update-*/upstream-diff.txt, logs and staged sources, then install:
-.\update-client.ps1 -Zip 'C:\Downloads\Evershade-new.zip' -Apply
-.\launch-mod.ps1
-```
-
-`-Apply` repeats preparation; it does not deploy the previous preview directory.
-The updater performs a native Git three-way merge: old original + local mods +
-new original. Missing classes, conflicts, changed AIR identity, failed tests or
-failed compilation stop installation. A clean merge is not a semantic guarantee:
-protocol or game behavior changes still need review and a live login test.
-
-Backups include the app, source baseline, mods, descriptors, scripts and local
-SharedObjects/ELS snapshots. **Those backups contain sensitive account data**:
-never upload or share them. The updater does not overwrite AppData, restore ELS,
-or change profile IDs. Retaining the same AIR ID retains the same local settings
-and login namespace; renaming it looks like a fresh installation.
-
-The SWF is copied last, but deployment is not a filesystem transaction. If an
-installation fails during copying, close the game and restore the app, original
-SWF and both source directories from the same backup. Do not mix baselines or
-copy encrypted login stores between different profile IDs.
-
-Updating this Git repository is separate from updating the game. Back up local
-customizations before pulling repository changes. Repository patch changes are
-not automatically reapplied to an already initialized `src-mod`; review and port
-them, or test a fresh clone with the supported baseline.
-
-## Optional multi-client setup (advanced, local only)
-
-The public examples use **LeaderPlayer**, **FollowerOne**, **FollowerTwo**. These
-are placeholders, not accounts. Single-client `launch-mod.ps1` needs no changes.
-
-For following, consistently replace these three names with your in-game character
-names in local `src-mod`, profile XML contents/filenames, `launch-mod.ps1`,
-`launch-clients.ps1`, `update-client.ps1` and the test fixtures. Rebuild and launch:
-
-```powershell
-.\launch-clients.ps1
-# Or one configured profile:
-.\launch-mod.ps1 -Profile LeaderPlayer
-```
-
-Use the replacement name in the final command after customization. Keep these
-edits local and never commit actual account names. No passwords belong in code.
-Each AIR profile has its own native login/settings storage. Sign in once per
-profile; saved-login reuse depends on the game's native behavior and valid
-credentials. This does not automatically select a character or press Play.
-
-Followers must match their profile names; mismatches pause automation. Enable
-Follow and optionally Follow portals on followers. Default hotkeys: comma toggles
-follow; period on the leader requests follower teleports, subject to native
-cooldown/map rules. Keys are rebindable and ignored while typing. Grid arrangement
-keeps window sizes; smaller screens may overlap. Following is conservative direct
-movement, not general obstacle pathfinding, and portal transitions can time out.
-
-## Tests and diagnostics
-
-After setup, from the repository directory:
-
-```powershell
-Get-ChildItem test-*.js | ForEach-Object {
-    node $_.FullName
-    if ($LASTEXITCODE -ne 0) { throw "Failed: $($_.Name)" }
-}
-.\test-network-air.ps1
-```
-
-Source-level tests use native API stubs; they do not prove live-server behavior.
-The separate AIR probe tests the imported logger bytecode without game login.
-Startup logs live in ignored `logs/`. Native connection logs live under the AIR
-profile's AppData `Local Store`. Do not attach raw logs without checking them for
-private data. See [health diagnostics](HEALTH-TELEMETRY.md) for the disabled capture.
-
-## Publishing changes safely
-
-The public repository intentionally excludes `app/`, `backup/`, `src-decompiled/`,
-`src-mod/`, generated drop data, binaries and runtime output. Publish reviewed,
-anonymized changes in `patches/client.patch`, not your entire working folder.
-`.gitignore` does not sanitize tracked edits: inspect the staged diff and run
-`node check-public.js` before every push. Never force-add private directories.
+Version labels can repeat; the hash matters. Git contains patches and tools;
+Releases contain compiled SWFs. Game code/assets remain their owners' property;
+no rights to those are granted here. Source tests do not establish live-server
+safety. Connection logs remain enabled; HP/damage/debuff capture is disabled.

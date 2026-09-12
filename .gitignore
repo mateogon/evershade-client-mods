@@ -3,6 +3,8 @@
 !/.gitignore
 !/.gitattributes
 !/README.md
+!/AGENTS.md
+!/CLAUDE.md
 !/HEALTH-TELEMETRY.md
 !/*.ps1
 !/*.js
