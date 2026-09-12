@@ -1,0 +1,15 @@
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const script=fs.readFileSync('package-portable.ps1','utf8'),xml=fs.readFileSync('portable.xml','utf8');
+assert.match(script,/-target bundle -arch x64/);
+assert.match(script,/-C \$inputDir Evershade\.swf assets/);
+assert.match(script,/build\\Evershade\.mod\.swf/);
+assert.doesNotMatch(script,/Copy-Item[^\r\n]*(?:APPDATA|ELS|profiles)/);
+assert.match(script,/if \(\$LASTEXITCODE -ne 0\).*no release ZIP/);
+assert.ok(script.indexOf('no release ZIP')<script.indexOf('Compress-Archive'));
+assert.match(xml,/<id>Evershade\.Community<\/id>/);
+assert.match(xml,/<content>Evershade\.swf<\/content>/);
+assert.match(xml,/<supportedProfiles>extendedDesktop<\/supportedProfiles>/);
+assert.match(script,/ConvertFrom-SecureString/);
+assert.doesNotMatch(script,/Write-Host[^\r\n]*(?:signPassword|newPassword)/);
+assert.match(fs.readFileSync('update-client.ps1','utf8'),/Copy-Item[^\r\n]*'portable\.xml'[^\r\n]*-Destination \$stage/);
+console.log('Portable packaging: explicit assets, isolated stable ID, captive runtime, signing isolation and failure gate.');

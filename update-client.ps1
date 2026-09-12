@@ -66,6 +66,7 @@ if ($conflicts.Count) { throw "Merge conflicts; live client unchanged. Resolve/r
 Copy-Item -LiteralPath (Join-Path $root 'profiles') -Destination $stage -Recurse
 if (Test-Path (Join-Path $root 'drops')) { Copy-Item -LiteralPath (Join-Path $root 'drops') -Destination $stage -Recurse }
 Get-ChildItem -LiteralPath $root -File | Where-Object { $_.Extension -in @('.js','.ps1') } | Copy-Item -Destination $stage
+Copy-Item -LiteralPath (Join-Path $root 'portable.xml') -Destination $stage
 New-Item -ItemType Directory -Path (Join-Path $stage 'build') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'build\network-probe') -Destination (Join-Path $stage 'build') -Recurse
 Push-Location $stage

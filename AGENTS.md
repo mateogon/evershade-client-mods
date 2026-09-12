@@ -166,6 +166,34 @@ do not remove that guard to disguise a mistaken login.
 
 ## Refresh patches and publish
 
+### Portable release packaging
+
+After compiling sanitized public sources, run `package-portable.ps1` with AIR_HOME
+set. It passes an explicit SWF/icon allowlist to ADT `-target bundle -arch x64` and
+creates a ZIP under a timestamped ignored build directory. Do not copy an existing
+runtime/app folder or ship ADL/the SDK as a shortcut. Runtime redistribution must
+follow the applicable HARMAN SDK license/tier; retain generated notices/metadata.
+
+`portable.xml` uses stable ID `Evershade.Community` and controls the portable release
+version. This intentionally differs from the original and named development
+profiles. Keep it stable across portable updates. The script reuses a self-signed
+AIR certificate and DPAPI-protected password under `build/portable-signing`.
+Back up that private signing store securely; never publish it. It is not Windows
+Authenticode signing. Do not silently rotate its identity when files are missing.
+
+Test a freshly extracted ZIP, without AIR_HOME/FFDEC_HOME or SDK directories in
+its process PATH, and inspect the loaded runtime path. Verify startup and Options
+links separately from live account login; do not automate credentials. Use only
+the isolated test process, not the user's existing clients. The package must not
+include AppData, settings, logs, profiles or signing materials. Verify archive
+contents and decompressed SWF identifiers before upload. Publish a NEW release,
+leaving prior assets intact; include hashes and exact supported server version.
+
+Users update by extracting a complete new bundle. Replacing a bundled SWF alone
+invalidates package integrity. Maintain PORTABLE.md and README quick-start text.
+
+### Public source patches
+
 Ignored `src-mod` edits are not delivered by committing only tests or documentation.
 Use a separate anonymized build for publication:
 

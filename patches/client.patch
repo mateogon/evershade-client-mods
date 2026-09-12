@@ -1,5 +1,5 @@
 diff --git a/com/company/assembleegameclient/game/MapUserInput.as b/com/company/assembleegameclient/game/MapUserInput.as
-index 5a67399..fc410ab 100644
+index 5a67399..5c82cd9 100644
 --- a/com/company/assembleegameclient/game/MapUserInput.as
 +++ b/com/company/assembleegameclient/game/MapUserInput.as
 @@ -3,6 +3,13 @@ package com.company.assembleegameclient.game
@@ -898,7 +898,7 @@ index 29df8fe..c7ef152 100644
  }
 -
 diff --git a/com/company/assembleegameclient/parameters/Parameters.as b/com/company/assembleegameclient/parameters/Parameters.as
-index eeb11a9..a0f53d4 100644
+index eeb11a9..0bea136 100644
 --- a/com/company/assembleegameclient/parameters/Parameters.as
 +++ b/com/company/assembleegameclient/parameters/Parameters.as
 @@ -236,6 +236,26 @@ package com.company.assembleegameclient.parameters
@@ -934,10 +934,19 @@ index eeb11a9..a0f53d4 100644
  }
 -
 diff --git a/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as b/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as
-index e907eb0..3788e10 100644
+index e907eb0..ec77a22 100644
 --- a/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as
 +++ b/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as
-@@ -15,7 +15,7 @@ package com.company.assembleegameclient.ui.options.registry
+@@ -1,6 +1,8 @@
+ package com.company.assembleegameclient.ui.options.registry
+ {
+    import flash.system.Capabilities;
++   import flash.net.URLRequest;
++   import flash.net.navigateToURL;
+    
+    public class OptionRegistry
+    {
+@@ -15,7 +17,7 @@ package com.company.assembleegameclient.ui.options.registry
        
        public static const TAB_GAMEPLAY:String = "Gameplay";
        
@@ -946,10 +955,12 @@ index e907eb0..3788e10 100644
        
        private var _options:Vector.<OptionDef>;
        
-@@ -28,6 +28,26 @@ package com.company.assembleegameclient.ui.options.registry
+@@ -28,12 +30,44 @@ package com.company.assembleegameclient.ui.options.registry
           buildSound();
           buildChat();
           buildGameplay();
++         add(new OptionDef().init("labGitHub","GitHub repository","Open source, instructions and issue tracker in your browser.","action","Lab","Project").withChoices(new <String>["Open GitHub"],[0]).withDefault(0).withCallback(this.labOpenGitHub));
++         add(new OptionDef().init("labUpdates","Downloads / Updates","Open published releases. Nothing is downloaded or installed automatically.","action","Lab","Project").withChoices(new <String>["View releases"],[0]).withDefault(0).withCallback(this.labOpenReleases));
 +         key("labFollowKey","Toggle follow","Comma: toggle locally on a follower, or send toggle from LeaderPlayer to FollowerOne and FollowerTwo. Ignored while typing.","Lab","Movement",188);
 +         key("labTeleportFollowersKey","Teleport followers","Period on LeaderPlayer: request normal teleport from FollowerOne and FollowerTwo. Requires same map, eligible target and no cooldown. Never queued.","Lab","Movement",190);
 +         choice("labAbilityMode",new <String>["On keypress","Automatic"],[0,1],"Ability mode","Automatic: target vulnerable enemies in combat, respecting mana/cooldown. No charged or teleport abilities; pauses for manual fire/ability. Can be saved in a settings preset.","Lab","Combat",0);
@@ -973,13 +984,29 @@ index e907eb0..3788e10 100644
        }
        
        public function get options() : Vector.<OptionDef>
-@@ -242,4 +262,3 @@ package com.company.assembleegameclient.ui.options.registry
+       {
+          return _options.concat();
+       }
++
++      private function labOpenGitHub() : void
++      {
++         navigateToURL(new URLRequest("https://github.com/mateogon/evershade-client-mods"),"_blank");
++      }
++
++      private function labOpenReleases() : void
++      {
++         navigateToURL(new URLRequest("https://github.com/mateogon/evershade-client-mods/releases"),"_blank");
++      }
+       
+       public function getByTab(param1:String) : Vector.<OptionDef>
+       {
+@@ -242,4 +276,3 @@ package com.company.assembleegameclient.ui.options.registry
        }
     }
  }
 -
 diff --git a/Evershade.as b/Evershade.as
-index 1f0f526..b27e182 100644
+index 1f0f526..baf2909 100644
 --- a/Evershade.as
 +++ b/Evershade.as
 @@ -8,6 +8,13 @@ package
