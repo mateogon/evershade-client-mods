@@ -1,0 +1,15 @@
+<application xmlns="http://ns.adobe.com/air/application/51.3">
+    <id>Evershade.Lab.FollowerTwo</id>
+    <filename>Evershade-FollowerTwo</filename>
+    <name>Evershade - FollowerTwo</name>
+    <versionNumber>1.0.0</versionNumber>
+    <initialWindow>
+        <content>Evershade.swf</content>
+        <title>Evershade - FollowerTwo (follower)</title>
+        <visible>true</visible>
+        <renderMode>direct</renderMode>
+        <depthAndStencil>false</depthAndStencil>
+        <requestedDisplayResolution>high</requestedDisplayResolution>
+    </initialWindow>
+    <supportedProfiles>extendedDesktop</supportedProfiles>
+</application>

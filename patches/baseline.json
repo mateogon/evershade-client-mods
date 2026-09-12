@@ -1,0 +1,13 @@
+{
+  "version": "2.1.17 hotfix",
+  "sha256": "1DE66DA6D8A930B1D0E55FCA80FF82BD695354A7BDFBB2D862D511BEDAF5F8BC",
+  "ffdec": "26.2.1",
+  "files": [
+    "com/company/assembleegameclient/game/MapUserInput.as",
+    "com/company/assembleegameclient/objects/Projectile.as",
+    "com/company/assembleegameclient/parameters/Parameters.as",
+    "com/company/assembleegameclient/ui/options/registry/OptionRegistry.as",
+    "Evershade.as",
+    "kabam/rotmg/messaging/impl/GameServerConnection.as"
+  ]
+}

@@ -1,0 +1,21 @@
+const fs=require('node:fs'), assert=require('node:assert/strict');
+const src=fs.readFileSync('src-mod/com/company/assembleegameclient/game/MapUserInput.as','utf8');
+const body=src.match(/private function labCheckIdentity\(player:Player\) : Boolean\s*\{([\s\S]*?)\n      \}/)[1].replace(/var (\w+):String/g,'var $1');
+const check=new Function('player','NativeApplication','AddTextLineVO',body);
+const native={nativeApplication:{applicationID:''}},notices=[];
+const ctx={labIdentityNotice_:'',gs_:{stage:{nativeWindow:{title:''}}},addTextLine:{dispatch:v=>notices.push(v.text)}};
+function verify(profile,actual){native.nativeApplication.applicationID='Evershade.Lab.'+profile;ctx.labIdentityNotice_='';return check.call(ctx,{name_:actual},native,function(a,b){this.text=b;});}
+for(const name of ['LeaderPlayer','FollowerOne','FollowerTwo'])assert.equal(verify(name,name),true);
+assert.equal(verify('FollowerOne','FollowerTwo'),false);assert.match(ctx.gs_.stage.nativeWindow.title,/FollowerOne.*FollowerTwo/);assert.match(notices.at(-1),/PROFILE MISMATCH/);
+assert.equal(verify('FollowerTwo','FollowerOne'),false);
+const followerBody=src.match(/private function labIsFollower\(player:Player\) : Boolean\s*\{([\s\S]*?)\n      \}/)[1];
+const follower=new Function('player',followerBody);
+assert.equal(follower.call({labCheckIdentity:()=>true},{name_:'FollowerTwo'}),true);
+assert.equal(follower.call({labCheckIdentity:()=>false},{name_:'FollowerTwo'}),false);
+assert.equal(follower.call({labCheckIdentity:()=>true},{name_:'LeaderPlayer'}),false);
+const ids=['LeaderPlayer','FollowerOne','FollowerTwo'].map(p=>fs.readFileSync('profiles/'+p+'.xml','utf8').match(/<id>(.*?)<\/id>/)[1]);
+assert.equal(new Set(ids).size,3);
+assert.match(fs.readFileSync('launch-clients.ps1','utf8'),/'LeaderPlayer','FollowerOne','FollowerTwo'/);
+assert.match(src,/FollowerTwo:labPortals","labReceivePortal"/);
+assert.match(src,/FollowerTwo:labPortals","labReceiveCommand"/);
+console.log('Three-profile checks passed: unique storage IDs, launcher roster, FollowerTwo follower eligibility, two-follower dispatch and real-name mismatch guard.');

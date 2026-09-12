@@ -1,0 +1,15 @@
+<application xmlns="http://ns.adobe.com/air/application/51.3">
+    <id>Evershade.Lab.LeaderPlayer</id>
+    <filename>Evershade-LeaderPlayer</filename>
+    <name>Evershade - LeaderPlayer</name>
+    <versionNumber>1.0.0</versionNumber>
+    <initialWindow>
+        <content>Evershade.swf</content>
+        <title>Evershade - LeaderPlayer (leader)</title>
+        <visible>true</visible>
+        <renderMode>direct</renderMode>
+        <depthAndStencil>false</depthAndStencil>
+        <requestedDisplayResolution>high</requestedDisplayResolution>
+    </initialWindow>
+    <supportedProfiles>extendedDesktop</supportedProfiles>
+</application>

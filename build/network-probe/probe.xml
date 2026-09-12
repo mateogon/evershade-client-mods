@@ -1,0 +1,4 @@
+<application xmlns="http://ns.adobe.com/air/application/51.3">
+<id>Evershade.Lab.NetworkProbe</id><filename>NetworkProbe</filename><versionNumber>1.0.0</versionNumber>
+<initialWindow><content>NetworkProbe.swf</content><visible>false</visible></initialWindow>
+<supportedProfiles>extendedDesktop</supportedProfiles></application>

@@ -1,0 +1,1351 @@
+diff --git a/com/company/assembleegameclient/game/MapUserInput.as b/com/company/assembleegameclient/game/MapUserInput.as
+index 5a67399..fc410ab 100644
+--- a/com/company/assembleegameclient/game/MapUserInput.as
++++ b/com/company/assembleegameclient/game/MapUserInput.as
+@@ -3,6 +3,13 @@ package com.company.assembleegameclient.game
+    import com.company.assembleegameclient.map.Square;
+    import com.company.assembleegameclient.objects.ObjectLibrary;
+    import com.company.assembleegameclient.objects.Player;
++   import com.company.assembleegameclient.objects.GameObject;
++   import com.company.assembleegameclient.objects.Container;
++   import com.company.assembleegameclient.objects.Portal;
++   import flash.net.LocalConnection;
++   import flash.desktop.NativeApplication;
++   import flash.events.StatusEvent;
++   import flash.events.AsyncErrorEvent;
+    import com.company.assembleegameclient.parameters.Parameters;
+    import com.company.assembleegameclient.tutorial.doneAction;
+    import com.company.assembleegameclient.ui.options.OptionsPanel;
+@@ -13,6 +20,7 @@ package com.company.assembleegameclient.game
+    import flash.events.TimerEvent;
+    import flash.geom.Point;
+    import flash.utils.Timer;
++   import flash.utils.getTimer;
+    import kabam.rotmg.core.StaticInjectorContext;
+    import kabam.rotmg.core.view.Layers;
+    import kabam.rotmg.game.model.AddTextLineVO;
+@@ -89,6 +97,307 @@ package com.company.assembleegameclient.game
+       private var inputStage_:Stage;
+       
+       private var disposed_:Boolean = false;
++      private var labLastEscape_:int = -2000;
++      private var labLootPending_:Boolean = false;
++      private var labPotionStatus_:Object = {};
++      private var labFollowing_:Boolean = false;
++      private static var labPortalSender_:LocalConnection;
++      private static var labPortalOffer_:Object;
++      private static var labPortalArrival_:Object;
++      private var labPortalReceiver_:LocalConnection;
++      private var labPortalPending_:Object;
++      private var labPortalSeen_:Number = 0;
++      private var labLeaderSeenAt_:int = -10000;
++      private var labLeaderSeenId_:int = -1;
++      private var labFollowManualUntil_:int = 0;
++      private var labFollowTeleportAt_:int = -10000;
++      private var labKeysDown_:Object = {};
++      private var labIdentityNotice_:String = "";
++      private var labCommandSeen_:Number = 0;
++      private var labAutoAbilityAt_:int = -1000;
++      private var labAutoAbilityTarget_:int = -1;
++      private var labAutoAbilityTargetAt_:int = 0;
++      private var labFollowSampleAt_:int = -10000;
++      private var labFollowProgressAt_:int = 0;
++      private var labFollowAnchorX_:Number = 0;
++      private var labFollowAnchorY_:Number = 0;
++      private var labFollowLeaderId_:int = -1;
++      private var labLootSequence_:int = 0;
++      private var labLootAt_:int = -1000;
++      private var labPotionPendingBag_:Container = null;
++      private var labPotionPendingSlot_:int = -1;
++      private var labPotionPendingType_:int = -1;
++      private var labPotionBlockedUntil_:Object = {};
++
++      private function labStatPotion(type:int) : Object
++      {
++         var xml:XML = ObjectLibrary.xmlLibrary_[type];
++         if(xml == null || !xml.hasOwnProperty("Consumable") || !xml.hasOwnProperty("Potion") || xml.Activate.length() != 1 || String(xml.@id).toLowerCase().indexOf("potion of ") < 0) return null;
++         var effect:XML = xml.Activate[0];
++         if(String(effect) != "IncrementStat" || String(effect.@percentage).toLowerCase() == "true") return null;
++         var fields:Array = null;
++         switch(int(effect.@stat))
++         {
++            case 0: fields = ["maxHP_","maxHPBoost_","maxHPMax_","SPS_Life"]; break;
++            case 3: fields = ["maxMP_","maxMPBoost_","maxMPMax_","SPS_Mana"]; break;
++            case 20: fields = ["attack_","attackBoost_","attackMax_","SPS_Attack"]; break;
++            case 21: fields = ["defense_","defenseBoost_","defenseMax_","SPS_Defense"]; break;
++            case 22: fields = ["speed_","speedBoost_","speedMax_","SPS_Speed"]; break;
++            case 26: fields = ["vitality_","vitalityBoost_","vitalityMax_","SPS_Vitality"]; break;
++            case 27: fields = ["wisdom_","wisdomBoost_","wisdomMax_","SPS_Wisdom"]; break;
++            case 28: fields = ["dexterity_","dexterityBoost_","dexterityMax_","SPS_Dexterity"]; break;
++         }
++         var amount:Number = Number(effect.@amount);
++         return fields != null && isFinite(amount) && amount > 0 ? {fields:fields,amount:amount} : null;
++      }
++
++      private function labCanUseStatPotion(player:Player, potion:Object) : Boolean
++      {
++         var fields:Array = potion.fields;
++         var maximum:Number = Number(player[fields[2]]);
++         if(!isFinite(maximum) || maximum <= 0) return false;
++         if(Number(player[fields[0]]) - Number(player[fields[1]]) < maximum) return true;
++         var stored:Number = Number(player[fields[3]]);
++         var capacity:Number = Number(player[fields[3] + "_Max"]);
++         if(this.labPotionStatus_[fields[3]] != stored + "/" + capacity)
++         {
++            this.labPotionStatus_[fields[3]] = stored + "/" + capacity;
++            trace("[Lab potion] " + fields[3] + " maxed; storage=" + stored + "/" + capacity);
++         }
++         // Storage units need not equal XML stat points. Let the server accept/reject
++         // one use when space is reported; the pending-use backoff prevents spam.
++         return isFinite(stored) && stored >= 0 && isFinite(capacity) && capacity > 0 && stored < capacity;
++      }
++
++      private function labLootDestination(player:Player, type:int) : int
++      {
++         if(!this.labLootAllowed(type)) return -1;
++         var statPotion:Object = this.labStatPotion(type);
++         if(statPotion != null)
++         {
++            if(Number(this.labPotionBlockedUntil_[type]) > getTimer()) return -1;
++            return this.labCanUseStatPotion(player,statPotion) ? 256 : -1;
++         }
++         if(type == 2594 || type == 2595)
++         {
++            var potion:Object = this.potionInventoryModel.getPotionModel(type);
++            if(potion != null && player.getPotionCount(type) < potion.maxPotionCount) return PotionInventoryModel.getPotionSlot(type);
++            return -1;
++         }
++         var slot:int = player.nextAvailableInventorySlot();
++         return slot >= 4 && slot < Math.min(player.equipment_.length,player.hasBackpack_ ? 20 : 12) && player.equipment_[slot] == -1 ? slot : -1;
++      }
++
++      private function labLootAllowed(type:int) : Boolean
++      {
++         if(type < 0) return false;
++         var xml:XML = ObjectLibrary.xmlLibrary_[type];
++         if(xml == null || !xml.hasOwnProperty("Tier") || !xml.hasOwnProperty("SlotType") || xml.hasOwnProperty("Consumable")) return true;
++         for each(var tag:String in ["Rare","SetTier","SNormal","SPlus","Origin","Mortal","Divine","Legendary","Godly","Mythical","Olympian","Celestial","GlitchedTier","ReskinTier","Shiny","MountTier","LootBox","@setType"])
++         {
++            if(xml.hasOwnProperty(tag)) return true;
++         }
++         if(ObjectLibrary.propsLibrary_[type] != null && ObjectLibrary.propsLibrary_[type].isShiny_) return true;
++         var tier:Number = Number(xml.Tier);
++         if(!isFinite(tier) || tier < 0) return true;
++         var slotType:int = int(xml.SlotType);
++         if(slotType == 9) return tier >= int(Parameters.data_.labLootRingTier);
++         for each(var character:XML in ObjectLibrary.playerChars_)
++         {
++            var slots:Array = String(character.SlotTypes).split(",");
++            if(slots.length < 4) continue;
++            if(slotType == int(slots[0]) || slotType == int(slots[2])) return tier >= int(Parameters.data_.labLootGearTier);
++            if(slotType == int(slots[1])) return tier >= int(Parameters.data_.labLootAbilityTier);
++         }
++         return true;
++      }
++
++      private function labLootBag(player:Player) : Container
++      {
++         var best:Container = null;
++         var bestDistance:Number = 1;
++         for each(var object:GameObject in this.gs_.map.goDict_)
++         {
++            var bag:Container = object as Container;
++            if(bag == null || !bag.isLoot_ || bag.equipment_ == null || (bag.ownerId_ >= 0 && !bag.isBoundToCurrentAccount())) continue;
++            var dx:Number = bag.x_ - player.x_;
++            var dy:Number = bag.y_ - player.y_;
++            var distance:Number = dx * dx + dy * dy;
++            if(distance > bestDistance) continue;
++            for(var slot:int = 0; slot < Math.min(8,bag.equipment_.length); slot++)
++            {
++               if(this.labLootDestination(player,bag.equipment_[slot]) >= 0)
++               {
++                  best = bag;
++                  bestDistance = distance;
++                  break;
++               }
++            }
++         }
++         return best;
++      }
++
++      private function updateLabLoot(player:Player) : void
++      {
++         if(!Parameters.data_.labAutoLoot) return;
++         var now:int = getTimer();
++         if(this.labLootPending_)
++         {
++            if(this.labPotionPendingBag_ != null)
++            {
++               if(this.labPotionPendingBag_.equipment_[this.labPotionPendingSlot_] != this.labPotionPendingType_)
++               {
++                  this.labLootPending_ = false;
++                  this.labPotionPendingBag_ = null;
++                  this.labLootAt_ = now;
++                  return;
++               }
++               if(now - this.labLootAt_ < 3000) return;
++               trace("[Lab potion] No bag-slot confirmation for type=" + this.labPotionPendingType_ + "; retry paused 30s");
++               this.labPotionBlockedUntil_[this.labPotionPendingType_] = now + 30000;
++               this.labPotionPendingBag_ = null;
++               this.labLootPending_ = false;
++               this.labLootAt_ = now;
++               return;
++            }
++            if(this.gs_.gsc_.labInvResultSequence == this.labLootSequence_ && now - this.labLootAt_ < 3000) return;
++            this.labLootPending_ = false;
++            if(this.gs_.gsc_.labInvResultSequence == this.labLootSequence_ || this.gs_.gsc_.labInvResultCode != 0)
++            {
++               this.labLootAt_ = now + 2500;
++               return;
++            }
++            this.labLootAt_ = now;
++         }
++         if(player == null || player.dead_ || player.isPaused() || !this.enablePlayerInput_ || this.gs_.isGroupStunActive() || !this.labCombatMap() || now - this.labLootAt_ < 500) return;
++         var bag:Container = this.labLootBag(player);
++         if(bag == null) return;
++         for(var slot:int = 0; slot < Math.min(8,bag.equipment_.length); slot++)
++         {
++            var destination:int = this.labLootDestination(player,bag.equipment_[slot]);
++            if(destination < 0) continue;
++            this.labLootSequence_ = this.gs_.gsc_.labInvResultSequence;
++            this.labLootAt_ = now;
++            if(destination == 256)
++            {
++               this.labPotionPendingBag_ = bag;
++               this.labPotionPendingSlot_ = slot;
++               this.labPotionPendingType_ = bag.equipment_[slot];
++               this.labLootPending_ = this.gs_.gsc_.useItem_new(bag,slot,2);
++               if(!this.labLootPending_)
++               {
++                  this.labPotionBlockedUntil_[this.labPotionPendingType_] = now + 30000;
++                  this.labPotionPendingBag_ = null;
++               }
++            }
++            else if(destination == 254 || destination == 255)
++            {
++               this.labLootPending_ = this.gs_.gsc_.invSwapPotion(player,bag,slot,bag.equipment_[slot],player,destination,-1);
++            }
++            else
++            {
++               this.labLootPending_ = this.gs_.gsc_.invSwap(player,bag,slot,bag.equipment_[slot],player,destination,-1);
++            }
++            return;
++         }
++      }
++
++      private function labCombatMap() : Boolean
++      {
++         var name:String = String(this.gs_.map.name_).toLowerCase();
++         return !this.gs_.isNexus_ && name.indexOf("vault") < 0 && name != "nexus";
++      }
++
++      private function labClearShot(player:Player, target:GameObject, projectile:XML) : Boolean
++      {
++         // Straight-line tile traversal; curved/boomerang trajectories are not predicted.
++         var x:int = Math.floor(player.x_);
++         var y:int = Math.floor(player.y_);
++         var endX:int = Math.floor(target.x_);
++         var endY:int = Math.floor(target.y_);
++         var dx:Number = target.x_ - player.x_;
++         var dy:Number = target.y_ - player.y_;
++         var stepX:int = dx >= 0 ? 1 : -1;
++         var stepY:int = dy >= 0 ? 1 : -1;
++         var deltaX:Number = dx == 0 ? Number.POSITIVE_INFINITY : 1 / Math.abs(dx);
++         var deltaY:Number = dy == 0 ? Number.POSITIVE_INFINITY : 1 / Math.abs(dy);
++         var sideX:Number = dx == 0 ? Number.POSITIVE_INFINITY : (dx > 0 ? x + 1 - player.x_ : player.x_ - x) * deltaX;
++         var sideY:Number = dy == 0 ? Number.POSITIVE_INFINITY : (dy > 0 ? y + 1 - player.y_ : player.y_ - y) * deltaY;
++         var steps:int = Math.abs(endX - x) + Math.abs(endY - y) + 1;
++         for(var i:int = 0; i < steps; i++)
++         {
++            var square:Square = this.gs_.map.getSquare(x + 0.5,y + 0.5);
++            if(square == null || square.tileType_ == 255) return false;
++            var obstacle:GameObject = square.obj_;
++            if(!projectile.hasOwnProperty("PassesEverything") && obstacle != null && obstacle.props_ != null && !obstacle.props_.isEnemy_ && (obstacle.props_.enemyOccupySquare_ || (!projectile.hasOwnProperty("PassesCover") && obstacle.props_.occupySquare_))) return false;
++            if(x == endX && y == endY) return true;
++            if(sideX < sideY) { x += stepX; sideX += deltaX; }
++            else if(sideY < sideX) { y += stepY; sideY += deltaY; }
++            else { x += stepX; y += stepY; sideX += deltaX; sideY += deltaY; }
++         }
++         return false;
++      }
++
++      private function labTarget(player:Player, ability:Boolean = false) : GameObject
++      {
++         if((!ability && !Parameters.data_.labAutoAim) || !this.labCombatMap()) return null;
++         var weapon:XML = ObjectLibrary.xmlLibrary_[player.equipment_[0]];
++         if(!ability && (weapon == null || !weapon.hasOwnProperty("Projectile"))) return null;
++         var range:Number = ability ? 12 : Number(weapon.Projectile[0].Speed) * Number(weapon.Projectile[0].LifetimeMS) / 10000;
++         if(!isFinite(range) || range <= 0) return null;
++         var weaponRange:Number = range;
++         if(!ability) range *= 1.2;
++         var best:GameObject = null;
++         var bestQuest:Boolean = false;
++         var bestInRange:Boolean = false;
++         var bestDistance:Number = Number.MAX_VALUE;
++         for each(var target:GameObject in this.gs_.map.goDict_)
++         {
++            if(target == null || target == player || target.hp_ <= 0) continue;
++            var xml:XML = ObjectLibrary.xmlLibrary_[target.objectType_];
++            if(xml == null || !xml.hasOwnProperty("Enemy")) continue;
++            if((ability || !Parameters.data_.labPreShoot) && (target.isInvulnerable() || target.isInvincible())) continue;
++            var dx:Number = target.x_ - player.x_;
++            var dy:Number = target.y_ - player.y_;
++            var distance:Number = dx * dx + dy * dy;
++            if(distance > range * range) continue;
++            var inRange:Boolean = distance <= weaponRange * weaponRange;
++            if(!ability && int(Parameters.data_.labAimMode) == 1)
++            {
++               var difference:Number = Math.atan2(dy,dx) - Parameters.data_.cameraAngle - Math.atan2(this.gs_.map.cursorY_,this.gs_.map.cursorX_);
++               if(Math.abs(Math.atan2(Math.sin(difference),Math.cos(difference))) > Math.PI / 12) continue;
++            }
++            var quest:Boolean = this.gs_.map.quest_ != null && this.gs_.map.quest_.objectIds_.indexOf(target.objectId_) >= 0;
++            if(best == null || (inRange && !bestInRange) || (inRange == bestInRange && ((quest && !bestQuest) || (quest == bestQuest && (target.maxHP_ > best.maxHP_ || (target.maxHP_ == best.maxHP_ && distance < bestDistance))))))
++            {
++               if(!ability && !this.labClearShot(player,target,weapon.Projectile[0])) continue;
++               best = target;
++               bestInRange = inRange;
++               bestQuest = quest;
++               bestDistance = distance;
++            }
++         }
++         return best;
++      }
++
++
++      private function labUseAbility(player:Player, x:Number, y:Number, phase:int) : Boolean
++      {
++         if(Parameters.data_.labAimAbility && !(player.isUnstable() && !player.isUnstableImmune()))
++         {
++            var target:GameObject = this.labTarget(player,true);
++            if(target != null && target.posS_ != null && target.posS_.length >= 5)
++            {
++               var world:Point = this.gs_.map.pSTopW(target.posS_[3],target.posS_[4]);
++               if(world != null && Math.abs(world.x - target.x_) < 0.75 && Math.abs(world.y - target.y_) < 0.75)
++               {
++                  x = target.posS_[3];
++                  y = target.posS_[4];
++               }
++            }
++         }
++         return player.useAltWeapon(x,y,phase);
++      }
+       
+       public function MapUserInput(param1:GameSprite)
+       {
+@@ -114,6 +423,7 @@ package com.company.assembleegameclient.game
+       
+       public function clearInput() : void
+       {
++         this.labKeysDown_ = {};
+          this.moveLeft_ = false;
+          this.moveRight_ = false;
+          this.moveUp_ = false;
+@@ -248,6 +558,12 @@ package com.company.assembleegameclient.game
+             return;
+          }
+          this.disposed_ = true;
++         if(this.labPortalReceiver_ != null)
++         {
++            try { this.labPortalReceiver_.close(); } catch(error:Error) {}
++            this.labPortalReceiver_ = null;
++         }
++         this.labPortalPending_ = null;
+          this.detachInputListeners();
+          if(this.mouseDownTimer != null)
+          {
+@@ -333,12 +649,12 @@ package com.company.assembleegameclient.game
+          {
+             if(param1.currentTarget == param1.target || param1.target == this.gs_.map || param1.target == this.gs_)
+             {
+-               _loc4_ = _loc7_.useAltWeapon(_loc2_,_loc5_,1);
++               _loc4_ = this.labUseAbility(_loc7_,_loc2_,_loc5_,1);
+             }
+          }
+          else
+          {
+-            _loc4_ = _loc7_.useAltWeapon(_loc2_,_loc5_,1);
++            _loc4_ = this.labUseAbility(_loc7_,_loc2_,_loc5_,1);
+          }
+          if(_loc4_)
+          {
+@@ -367,11 +683,11 @@ package com.company.assembleegameclient.game
+          }
+          if(_loc2_.isUnstable() && !_loc2_.isUnstableImmune())
+          {
+-            _loc2_.useAltWeapon(Math.random() * 600 - 300,Math.random() * 600 - 325,2);
++            this.labUseAbility(_loc2_,Math.random() * 600 - 300,Math.random() * 600 - 325,2);
+          }
+          else
+          {
+-            _loc2_.useAltWeapon(this.gs_.map.cursorX_,this.gs_.map.cursorY_,2);
++            this.labUseAbility(_loc2_,this.gs_.map.cursorX_,this.gs_.map.cursorY_,2);
+          }
+       }
+       
+@@ -442,12 +758,12 @@ package com.company.assembleegameclient.game
+             {
+                if(param1.currentTarget == param1.target || param1.target == this.gs_.map || param1.target == this.gs_)
+                {
+-                  _loc7_.useAltWeapon(_loc2_,_loc4_,1);
++                  this.labUseAbility(_loc7_,_loc2_,_loc4_,1);
+                }
+             }
+             else
+             {
+-               _loc7_.useAltWeapon(_loc2_,_loc4_,1);
++               this.labUseAbility(_loc7_,_loc2_,_loc4_,1);
+             }
+             return;
+          }
+@@ -513,13 +829,365 @@ package com.company.assembleegameclient.game
+          }
+       }
+       
++      public static function labPortalUsed(gs:GameSprite, id:int) : void
++      {
++         labPortalOffer_ = null;
++         var player:Player = gs.map.player_;
++         var portal:Portal = gs.map.goDict_[id] as Portal;
++         if(player == null || player.name_ != "LeaderPlayer" || portal == null || !portal.active_ || portal.lockedPortal_) return;
++         if(Math.abs(player.x_ - portal.x_) > 1.5 || Math.abs(player.y_ - portal.y_) > 1.5) return;
++         labPortalOffer_ = {stamp:new Date().time,leader:player.objectId_,id:id,type:portal.objectType_,x:portal.x_,y:portal.y_,name:portal.getName(),map:gs.map.name_,game:gs.gsc_.gameId_,host:gs.gsc_.server_.address,port:gs.gsc_.server_.port};
++      }
++
++      public static function labPortalConfirmed(game:int, host:String, port:int) : void
++      {
++         var offer:Object = labPortalOffer_;
++         labPortalOffer_ = null;
++         if(offer == null || new Date().time - offer.stamp > 4000) return;
++         offer.destinationGame = game;
++         offer.destinationHost = host;
++         offer.destinationPort = port;
++         try
++         {
++            if(labPortalSender_ == null)
++            {
++               labPortalSender_ = new LocalConnection();
++               labPortalSender_.addEventListener(StatusEvent.STATUS,labPortalSendStatus);
++               labPortalSender_.addEventListener(AsyncErrorEvent.ASYNC_ERROR,labPortalAsyncError);
++            }
++            labPortalSender_.send("app#Evershade.Lab.FollowerOne:labPortals","labReceivePortal",offer);
++            labPortalSender_.send("app#Evershade.Lab.FollowerTwo:labPortals","labReceivePortal",offer);
++         }
++         catch(error:Error) { trace("[Lab portals] Local delivery failed."); }
++      }
++
++      public static function labPortalCancel() : void
++      {
++         labPortalOffer_ = null;
++      }
++
++      private static function labPortalSendStatus(event:StatusEvent) : void
++      {
++         if(event.level == "error") trace("[Lab portals] Follower not listening; no portal follow delivered.");
++      }
++
++      private static function labPortalAsyncError(event:AsyncErrorEvent) : void
++      {
++         trace("[Lab portals] Local channel error.");
++      }
++
++      private function labPortalStop(reason:String) : void
++      {
++         this.labPortalPending_ = null;
++         labPortalArrival_ = null;
++         Parameters.data_.labFollowLeaderPlayer = false;
++         this.setPlayerMovement();
++         this.addTextLine.dispatch(new AddTextLineVO("*Client*","Follow portals stopped: " + reason + ". Re-enable Follow LeaderPlayer to retry."));
++      }
++
++      public function labReceivePortal(offer:Object) : void
++      {
++         var player:Player = this.gs_.map.player_;
++         if(this.disposed_ || !this.labIsFollower(player) || !Parameters.data_.labFollowLeaderPlayer || !Parameters.data_.labFollowPortals || labPortalArrival_ != null) return;
++         if(offer == null || !isFinite(Number(offer.stamp)) || offer.stamp <= this.labPortalSeen_ || Math.abs(new Date().time - Number(offer.stamp)) > 6000) return;
++         this.labPortalSeen_ = Number(offer.stamp);
++         if(offer.map != this.gs_.map.name_ || offer.game != this.gs_.gsc_.gameId_ || offer.host != this.gs_.gsc_.server_.address || offer.port != this.gs_.gsc_.server_.port || offer.leader != this.labLeaderSeenId_ || getTimer() - this.labLeaderSeenAt_ > 2500) return;
++         if(!isFinite(Number(offer.x)) || !isFinite(Number(offer.y)) || !isFinite(Number(offer.destinationGame)) || !(offer.destinationHost is String) || !isFinite(Number(offer.destinationPort))) return;
++         var portal:Portal = this.gs_.map.goDict_[offer.id] as Portal;
++         if(!this.labPortalMatches(portal,offer))
++         {
++            this.labPortalStop("the exact portal is missing or unavailable");
++            return;
++         }
++         this.labPortalPending_ = offer;
++         offer.receivedAt = getTimer();
++         this.addTextLine.dispatch(new AddTextLineVO("*Client*","Following LeaderPlayer through " + portal.getName()));
++      }
++
++      private function labPortalMatches(portal:Portal, offer:Object) : Boolean
++      {
++         return portal != null && portal.active_ && !portal.lockedPortal_ && portal.objectId_ == offer.id && portal.objectType_ == offer.type && portal.getName() == offer.name && Math.abs(portal.x_ - offer.x) < 0.1 && Math.abs(portal.y_ - offer.y) < 0.1;
++      }
++
++      private function labPortalListen(player:Player) : void
++      {
++         if(!this.labIsFollower(player)) return;
++         if(this.labPortalReceiver_ == null)
++         {
++            this.labPortalReceiver_ = new LocalConnection();
++            this.labPortalReceiver_.client = this;
++            this.labPortalReceiver_.allowDomain("app#Evershade.Lab.LeaderPlayer");
++            this.labPortalReceiver_.addEventListener(AsyncErrorEvent.ASYNC_ERROR,labPortalAsyncError);
++            try { this.labPortalReceiver_.connect("labPortals"); }
++            catch(error:Error) { this.labPortalStop("local channel unavailable; use the separate profile launchers"); }
++         }
++         for each(var candidate:GameObject in this.gs_.map.goDict_)
++         {
++            if(candidate is Player && candidate.name_ == "LeaderPlayer")
++            {
++               this.labLeaderSeenId_ = candidate.objectId_;
++               this.labLeaderSeenAt_ = getTimer();
++            }
++         }
++         if(!Parameters.data_.labFollowLeaderPlayer || !Parameters.data_.labFollowPortals)
++         {
++            this.labPortalPending_ = null;
++            labPortalArrival_ = null;
++         }
++      }
++
++      private function labToggleFollow() : void
++      {
++         Parameters.data_.labFollowLeaderPlayer = !Parameters.data_.labFollowLeaderPlayer;
++         this.labPortalPending_ = null;
++         labPortalArrival_ = null;
++         this.labFollowSampleAt_ = -10000;
++         this.setPlayerMovement();
++         Parameters.save();
++         this.addTextLine.dispatch(new AddTextLineVO("*Client*","Follow LeaderPlayer: " + (Parameters.data_.labFollowLeaderPlayer ? "ON" : "OFF")));
++      }
++
++      public function labReceiveCommand(command:Object) : void
++      {
++         var player:Player = this.gs_.map.player_;
++         if(this.disposed_ || !this.labIsFollower(player) || command == null || !isFinite(Number(command.stamp)) || command.stamp <= this.labCommandSeen_ || Math.abs(new Date().time - Number(command.stamp)) > 3000) return;
++         if(command.action != "toggleFollow" && command.action != "teleport") return;
++         this.labCommandSeen_ = Number(command.stamp);
++         if(command.action == "toggleFollow") { this.labToggleFollow(); return; }
++         var leader:Player = this.gs_.map.goDict_[command.leader] as Player;
++         if(command.map != this.gs_.map.name_ || command.game != this.gs_.gsc_.gameId_ || command.host != this.gs_.gsc_.server_.address || command.port != this.gs_.gsc_.server_.port || leader == null || leader.name_ != "LeaderPlayer" || leader.dead_)
++         {
++            this.addTextLine.dispatch(new AddTextLineVO("*Client*","Teleport skipped: LeaderPlayer is not confirmed in this map."));
++            return;
++         }
++         if(this.labPortalPending_ != null || labPortalArrival_ != null || !this.enablePlayerInput_ || !this.setHotkeysInput_ || this.gs_.isGroupStunActive() || player.dead_ || player.isPaused() || !this.gs_.map.allowPlayerTeleport_ || player.msUtilTeleport() > 0 || !player.isTeleportEligible(leader))
++         {
++            this.addTextLine.dispatch(new AddTextLineVO("*Client*","Teleport unavailable: cooldown, map restriction or transition. Request not queued."));
++            return;
++         }
++         if(player.teleportTo(leader)) this.addTextLine.dispatch(new AddTextLineVO("*Client*","Teleport to LeaderPlayer requested."));
++      }
++
++      private function labHotkey(event:KeyboardEvent) : Boolean
++      {
++         var code:uint = event.keyCode;
++         if(code == 0 || (code != Parameters.data_.labFollowKey && code != Parameters.data_.labTeleportFollowersKey)) return false;
++         if(!this.enablePlayerInput_ || !this.setHotkeysInput_ || this.gs_.stage.focus != null || this.gs_.isGroupStunActive()) return true;
++         if(this.labKeysDown_[code]) return true;
++         this.labKeysDown_[code] = true;
++         event.preventDefault();
++         var player:Player = this.gs_.map.player_;
++         if(player == null) return true;
++         if(this.labIsFollower(player) && code == Parameters.data_.labFollowKey) { this.labToggleFollow(); return true; }
++         if(!this.labCheckIdentity(player)) return true;
++         if(player.name_ != "LeaderPlayer") return true;
++         var command:Object = {action:code == Parameters.data_.labFollowKey ? "toggleFollow" : "teleport",stamp:new Date().time,leader:player.objectId_,map:this.gs_.map.name_,game:this.gs_.gsc_.gameId_,host:this.gs_.gsc_.server_.address,port:this.gs_.gsc_.server_.port};
++         try
++         {
++            if(labPortalSender_ == null)
++            {
++               labPortalSender_ = new LocalConnection();
++               labPortalSender_.addEventListener(StatusEvent.STATUS,labPortalSendStatus);
++               labPortalSender_.addEventListener(AsyncErrorEvent.ASYNC_ERROR,labPortalAsyncError);
++            }
++            labPortalSender_.send("app#Evershade.Lab.FollowerOne:labPortals","labReceiveCommand",command);
++            labPortalSender_.send("app#Evershade.Lab.FollowerTwo:labPortals","labReceiveCommand",command);
++            this.addTextLine.dispatch(new AddTextLineVO("*Client*","Follower command sent: " + command.action));
++         }
++         catch(error:Error) { this.addTextLine.dispatch(new AddTextLineVO("*Client*","Follower command could not be sent.")); }
++         return true;
++      }
++
++      private function updateLabAutoAbility(player:Player) : void
++      {
++         var now:int = getTimer();
++         if(int(Parameters.data_.labAbilityMode) != 1 || player == null || player.dead_ || player.isPaused() || !this.enablePlayerInput_ || !this.setHotkeysInput_ || !this.labCombatMap() || this.gs_.isGroupStunActive() || this.gs_.map.disableAbilities_ || this.specialKeyDown_ || this.rightMouseAbilityDown_ || this.mouseDown_ || this.labPortalPending_ != null || labPortalArrival_ != null)
++         {
++            this.labAutoAbilityTarget_ = -1;
++            return;
++         }
++         if(now - this.labAutoAbilityAt_ < 100) return;
++         this.labAutoAbilityAt_ = now;
++         var xml:XML = ObjectLibrary.xmlLibrary_[player.equipment_[1]];
++         if(xml == null || !xml.hasOwnProperty("Usable") || xml.hasOwnProperty("EndMpCost") || xml.hasOwnProperty("NukeCharge")) return;
++         for each(var effect:XML in xml.Activate) { if(String(effect) == "Teleport") return; }
++         var target:GameObject = this.labTarget(player,true);
++         if(target == null) { this.labAutoAbilityTarget_ = -1; return; }
++         if(this.labAutoAbilityTarget_ != target.objectId_)
++         {
++            this.labAutoAbilityTarget_ = target.objectId_;
++            this.labAutoAbilityTargetAt_ = now;
++            return;
++         }
++         if(now - this.labAutoAbilityTargetAt_ < 200 || now < player.nextAltAttack_ || Number(xml.MpCost) > player.mp_ || Number(xml.HpCost) >= player.hp_ || (player.isUnstable() && !player.isUnstableImmune())) return;
++         if(target.posS_ == null || target.posS_.length < 5) return;
++         var world:Point = this.gs_.map.pSTopW(target.posS_[3],target.posS_[4]);
++         if(world == null || !isFinite(world.x) || !isFinite(world.y) || !isFinite(target.x_) || !isFinite(target.y_) || Math.abs(world.x - target.x_) >= 0.75 || Math.abs(world.y - target.y_) >= 0.75) return;
++         player.useAltWeapon(target.posS_[3],target.posS_[4],1);
++      }
++
++      private function labFollowStalled(player:Player, leader:Player) : Boolean
++      {
++         var now:int = getTimer();
++         var dx:Number = player.x_ - this.labFollowAnchorX_;
++         var dy:Number = player.y_ - this.labFollowAnchorY_;
++         if(now - this.labFollowSampleAt_ > 500 || this.labFollowLeaderId_ != leader.objectId_ || dx * dx + dy * dy >= 0.25)
++         {
++            this.labFollowProgressAt_ = now;
++            this.labFollowAnchorX_ = player.x_;
++            this.labFollowAnchorY_ = player.y_;
++            this.labFollowLeaderId_ = leader.objectId_;
++         }
++         this.labFollowSampleAt_ = now;
++         if(now - this.labFollowProgressAt_ < 8000) return false;
++         this.labFollowProgressAt_ = now;
++         return true;
++      }
++
++      private function labFollowTeleport(player:Player, leader:Player) : void
++      {
++         if(!Parameters.data_.labFollowTeleport || !this.gs_.map.allowPlayerTeleport_ || leader == null || leader.name_ != "LeaderPlayer" || leader.dead_ || this.gs_.map.goDict_[leader.objectId_] != leader) return;
++         if(player.msUtilTeleport() > 0 || !player.isTeleportEligible(leader) || getTimer() - this.labFollowTeleportAt_ < 5000) return;
++         this.labFollowTeleportAt_ = getTimer();
++         if(player.teleportTo(leader))
++         {
++            this.addTextLine.dispatch(new AddTextLineVO("*Client*","Follow: teleport to LeaderPlayer requested."));
++         }
++      }
++
++      private function labCheckIdentity(player:Player) : Boolean
++      {
++         if(player == null || player.name_ == null || player.name_ == "") return false;
++         var id:String = NativeApplication.nativeApplication.applicationID;
++         var expected:String = id.indexOf("Evershade.Lab.") == 0 ? id.substr(14) : "";
++         var actual:String = player.name_;
++         if(this.labIdentityNotice_ != actual)
++         {
++            this.labIdentityNotice_ = actual;
++            if(this.gs_.stage != null && this.gs_.stage.nativeWindow != null) this.gs_.stage.nativeWindow.title = "Evershade - " + (expected == "" ? "Default" : expected) + " | in game: " + actual;
++            this.addTextLine.dispatch(new AddTextLineVO("*Client*",expected == "" || actual == expected ? "Account verified in game: " + actual : "PROFILE MISMATCH: expected " + expected + ", connected as " + actual + ". Automation paused."));
++         }
++         return expected == "" || actual == expected;
++      }
++
++      private function labIsFollower(player:Player) : Boolean
++      {
++         return player != null && (player.name_ == "FollowerOne" || player.name_ == "FollowerTwo") && this.labCheckIdentity(player);
++      }
++
++      private function updateLabFollow(player:Player) : void
++      {
++         var wasFollowing:Boolean = this.labFollowing_;
++         this.labFollowing_ = false;
++         if(wasFollowing) this.setPlayerMovement();
++         this.labPortalListen(player);
++         if(!this.labIsFollower(player) || !Parameters.data_.labFollowLeaderPlayer || !this.enablePlayerInput_ || !this.setHotkeysInput_ || this.gs_.isGroupStunActive() || player.dead_ || player.isPaused() || player.isConfused()) return;
++         if(this.moveLeft_ || this.moveRight_ || this.moveUp_ || this.moveDown_ || this.rotateLeft_ || this.rotateRight_)
++         {
++            this.labFollowManualUntil_ = getTimer() + 1000;
++            return;
++         }
++         if(getTimer() < this.labFollowManualUntil_) return;
++         var leader:Player = null;
++         for each(var candidate:GameObject in this.gs_.map.goDict_)
++         {
++            if(candidate is Player && candidate.name_ == "LeaderPlayer")
++            {
++               leader = candidate as Player;
++               break;
++            }
++         }
++         if(labPortalArrival_ != null)
++         {
++            if(getTimer() - labPortalArrival_.sentAt > 15000)
++            {
++               this.labPortalStop("arrival could not be confirmed with LeaderPlayer visible");
++               return;
++            }
++            if(labPortalArrival_.source == this.gs_) return;
++            if(this.gs_.gsc_.gameId_ != labPortalArrival_.destinationGame || this.gs_.gsc_.server_.address != labPortalArrival_.destinationHost || this.gs_.gsc_.server_.port != labPortalArrival_.destinationPort)
++            {
++               this.labPortalStop("destination differs from the leader's transition");
++               return;
++            }
++            if(leader == null) return;
++            labPortalArrival_ = null;
++            this.addTextLine.dispatch(new AddTextLineVO("*Client*","Portal arrival confirmed: LeaderPlayer is here."));
++         }
++         var goal:GameObject = leader;
++         if(this.labPortalPending_ != null)
++         {
++            var portal:Portal = this.gs_.map.goDict_[this.labPortalPending_.id] as Portal;
++            if(getTimer() - this.labPortalPending_.receivedAt > 10000 || !this.labPortalMatches(portal,this.labPortalPending_))
++            {
++               this.labPortalStop("portal disappeared or approach timed out");
++               return;
++            }
++            goal = portal;
++         }
++         else if(leader == null || leader.dead_ || leader.isPaused()) return;
++         var dx:Number = goal.x_ - player.x_;
++         var dy:Number = goal.y_ - player.y_;
++         var distance:Number = Math.sqrt(dx * dx + dy * dy);
++         if(!isFinite(distance)) return;
++         if(this.labPortalPending_ != null && distance <= 0.75)
++         {
++            labPortalArrival_ = this.labPortalPending_;
++            this.labPortalPending_ = null;
++            labPortalArrival_.source = this.gs_;
++            labPortalArrival_.sentAt = getTimer();
++            this.gs_.gsc_.usePortal(int(labPortalArrival_.id));
++            return;
++         }
++         if(this.labPortalPending_ == null && distance <= (wasFollowing ? 1.8 : 2.5)) return;
++         if(this.labPortalPending_ == null && this.labFollowStalled(player,leader) && distance > 4)
++         {
++            this.labFollowTeleport(player,leader);
++            return;
++         }
++         dx /= distance;
++         dy /= distance;
++         // ponytail: stop at obstacles; add routing only if direct follow proves insufficient.
++         for(var step:Number = 0.2; step <= Math.min(1.0,distance); step += 0.2)
++         {
++            for(var side:int = -1; side <= 1; side++)
++            {
++               var square:Square = this.gs_.map.getSquare(player.x_ + dx * step - dy * side * 0.3,player.y_ + dy * step + dx * side * 0.3);
++               if(square == null || !square.isWalkable() || square.props_ == null || square.props_.maxDamage_ > 0 || square.props_.minDamage_ > 0)
++               {
++                  if(this.labPortalPending_ != null) this.labPortalStop("approach blocked by terrain");
++                  return;
++               }
++            }
++         }
++         var angle:Number = Math.atan2(dy,dx) - Parameters.data_.cameraAngle;
++         player.setRelativeMovement(0,Math.cos(angle),Math.sin(angle));
++         this.labFollowing_ = true;
++      }
++
+       private function onEnterFrame(param1:Event) : void
+       {
+          var _loc2_:Number = NaN;
+          var _loc3_:Player = null;
+          this.gs_.map.sampleMousePosition();
+          doneAction(this.gs_,"Update");
+-         if(this.enablePlayerInput_ && !this.gs_.isGroupStunActive() && (this.mouseDown_ || this.autofire_))
++         var labPlayer:Player = this.gs_.map.player_;
++         if(labPlayer != null && !this.labCheckIdentity(labPlayer))
++         {
++            if(this.labFollowing_) { this.labFollowing_ = false; this.setPlayerMovement(); }
++            return;
++         }
++         if(labPlayer != null && !labPlayer.dead_ && Parameters.data_.labAutoNexus && this.labCombatMap() && labPlayer.maxHP_ > 0 && labPlayer.hp_ > 0 && labPlayer.hp_ * 100 <= labPlayer.maxHP_ * Number(Parameters.data_.labNexusPercent) && getTimer() - this.labLastEscape_ >= 2000)
++         {
++            this.labLastEscape_ = getTimer();
++            this.gs_.gsc_.escape();
++            return;
++         }
++         var labAim:GameObject = this.mouseDown_ || labPlayer == null || labPlayer.dead_ || labPlayer.isPaused() || !this.enablePlayerInput_ ? null : this.labTarget(labPlayer);
++         this.updateLabFollow(labPlayer);
++         this.updateLabLoot(labPlayer);
++         this.updateLabAutoAbility(labPlayer);
++         if(this.enablePlayerInput_ && !this.gs_.isGroupStunActive() && (this.mouseDown_ || this.autofire_ || labAim != null))
+          {
+             _loc3_ = this.gs_.map.player_;
+             if(_loc3_ != null)
+@@ -531,6 +1199,7 @@ package com.company.assembleegameclient.game
+                else
+                {
+                   _loc2_ = Math.atan2(this.gs_.map.cursorY_,this.gs_.map.cursorX_);
++                  if(labAim != null) _loc2_ = Math.atan2(labAim.y_ - _loc3_.y_,labAim.x_ - _loc3_.x_) - Parameters.data_.cameraAngle;
+                   _loc3_.attemptAttackAngle(_loc2_);
+                }
+             }
+@@ -539,6 +1208,7 @@ package com.company.assembleegameclient.game
+       
+       private function onKeyDown(param1:KeyboardEvent) : void
+       {
++         if(this.labHotkey(param1)) return;
+          var _loc4_:Boolean = false;
+          var _loc2_:Square = null;
+          var _loc3_:Stage = this.gs_.stage;
+@@ -639,11 +1309,11 @@ package com.company.assembleegameclient.game
+                {
+                   if(_loc5_.isUnstable() && !_loc5_.isUnstableImmune())
+                   {
+-                     _loc4_ = _loc5_.useAltWeapon(Math.random() * 600 - 300,Math.random() * 600 - 300,1);
++                     _loc4_ = this.labUseAbility(_loc5_,Math.random() * 600 - 300,Math.random() * 600 - 300,1);
+                   }
+                   else
+                   {
+-                     _loc4_ = _loc5_.useAltWeapon(this.gs_.map.cursorX_,this.gs_.map.cursorY_,1);
++                     _loc4_ = this.labUseAbility(_loc5_,this.gs_.map.cursorX_,this.gs_.map.cursorY_,1);
+                   }
+                   if(_loc4_)
+                   {
+@@ -764,6 +1434,7 @@ package com.company.assembleegameclient.game
+       
+       private function onKeyUp(param1:KeyboardEvent) : void
+       {
++         delete this.labKeysDown_[param1.keyCode];
+          var _loc2_:Player = null;
+          if(this.gs_ != null && this.gs_.isGroupStunActive())
+          {
+@@ -802,11 +1473,11 @@ package com.company.assembleegameclient.game
+                   _loc2_ = this.gs_.map.player_;
+                   if(_loc2_.isUnstable() && !_loc2_.isUnstableImmune())
+                   {
+-                     this.gs_.map.player_.useAltWeapon(Math.random() * 600 - 300,Math.random() * 600 - 325,2);
++                     this.labUseAbility(this.gs_.map.player_,Math.random() * 600 - 300,Math.random() * 600 - 325,2);
+                   }
+                   else
+                   {
+-                     this.gs_.map.player_.useAltWeapon(this.gs_.map.cursorX_,this.gs_.map.cursorY_,2);
++                     this.labUseAbility(this.gs_.map.player_,this.gs_.map.cursorX_,this.gs_.map.cursorY_,2);
+                   }
+                }
+          }
+@@ -881,4 +1552,3 @@ package com.company.assembleegameclient.game
+       }
+    }
+ }
+-
+diff --git a/com/company/assembleegameclient/objects/Projectile.as b/com/company/assembleegameclient/objects/Projectile.as
+index 29df8fe..c7ef152 100644
+--- a/com/company/assembleegameclient/objects/Projectile.as
++++ b/com/company/assembleegameclient/objects/Projectile.as
+@@ -26,10 +26,15 @@ package com.company.assembleegameclient.objects
+    import flash.geom.Rectangle;
+    import flash.geom.Vector3D;
+    import flash.utils.Dictionary;
++   import flash.utils.getTimer;
+    import kabam.rotmg.stage3D.GraphicsFillExtra;
+    
+    public class Projectile extends BasicObject
+    {
++      private static var labNearMap_:Map;
++      private static var labNearPlayer_:Player;
++      private static var labNearAt_:int = -1000;
++      private static var labHasNearby_:Boolean = true;
+       
+       private static const MUTATION_GLITCH_VARIANT_COUNT:int = 4;
+       
+@@ -418,7 +423,7 @@ package com.company.assembleegameclient.objects
+          this.damage_ = param1;
+       }
+       
+-      public function setItemReskinTexture(param1:BitmapData, param2:Number = NaN) : void
++      public function setItemReskinTexture(param1:BitmapData, param2:Number = undefined) : void
+       {
+          var _loc3_:Number = NaN;
+          if(param1 == null)
+@@ -1507,9 +1512,41 @@ package com.company.assembleegameclient.objects
+          return _loc11_;
+       }
+       
++      private function labHasNearbyPlayers(player:Player) : Boolean
++      {
++         if(map_ == null || map_.goDict_ == null || player == null) return true;
++         var now:int = getTimer();
++         if(Projectile.labNearMap_ == map_ && Projectile.labNearPlayer_ == player && now >= Projectile.labNearAt_ && now - Projectile.labNearAt_ < 100) return Projectile.labHasNearby_;
++         Projectile.labNearMap_ = map_;
++         Projectile.labNearPlayer_ = player;
++         Projectile.labNearAt_ = now;
++         Projectile.labHasNearby_ = false;
++         for each(var object:GameObject in map_.goDict_)
++         {
++            var other:Player = object as Player;
++            if(other == null || other == player || other.dead_) continue;
++            var dx:Number = other.x_ - player.x_;
++            var dy:Number = other.y_ - player.y_;
++            if(dx * dx + dy * dy <= 225)
++            {
++               Projectile.labHasNearby_ = true;
++               break;
++            }
++         }
++         return Projectile.labHasNearby_;
++      }
++
+       private function getLocalPlayerHit(param1:Number, param2:Number) : GameObject
+       {
++         if(Parameters.data_ != null && Parameters.data_.labReduceClientHits && Number(Parameters.data_.labReduceHitsMode) == 1) return null;
+          var _loc7_:Player = map_ != null ? map_.player_ : null;
++         var labThreshold:Number = Parameters.data_ != null ? Number(Parameters.data_.labReduceHitsPercent) : 75;
++         labThreshold = isFinite(labThreshold) ? Math.max(75,Math.min(100,labThreshold)) : 75;
++         // Evaluate the latest local HP at each collision, without changing the saved toggle.
++         if(Parameters.data_ != null && Parameters.data_.labReduceClientHits && _loc7_ != null && _loc7_.maxHP_ > 0 && _loc7_.hp_ > 0 && (_loc7_.hp_ < _loc7_.maxHP_ * labThreshold / 100 || (Parameters.data_.labReduceHitsAlone && !this.labHasNearbyPlayers(_loc7_))))
++         {
++            return null;
++         }
+          if(_loc7_ == null || _loc7_.dead_ || _loc7_.isInvincible() || _loc7_.isPaused() || _loc7_.isHidden() || _loc7_.isStasis() || _loc7_.isUntargetable())
+          {
+             return null;
+@@ -1716,4 +1753,3 @@ package com.company.assembleegameclient.objects
+       }
+    }
+ }
+-
+diff --git a/com/company/assembleegameclient/parameters/Parameters.as b/com/company/assembleegameclient/parameters/Parameters.as
+index eeb11a9..a0f53d4 100644
+--- a/com/company/assembleegameclient/parameters/Parameters.as
++++ b/com/company/assembleegameclient/parameters/Parameters.as
+@@ -236,6 +236,26 @@ package com.company.assembleegameclient.parameters
+          setDefaultKey("switchQuest",78);
+          setDefaultKey("refresh_button_servers",82);
+          setDefault("showStatistics",3);
++         setDefault("labAutoAim",false);
++         setDefault("labFollowLeaderPlayer",false);
++         setDefault("labFollowKey",188);
++         setDefault("labTeleportFollowersKey",190);
++         setDefault("labAbilityMode",0);
++         setDefault("labFollowTeleport",true);
++         setDefault("labFollowPortals",false);
++         setDefault("labAutoLoot",false);
++         setDefault("labLootGearTier",10);
++         setDefault("labLootAbilityTier",4);
++         setDefault("labLootRingTier",4);
++         setDefault("labAimAbility",true);
++         setDefault("labReduceClientHits",false);
++         setDefault("labReduceHitsMode",0);
++         setDefault("labReduceHitsPercent",75);
++         setDefault("labReduceHitsAlone",false);
++         setDefault("labAimMode",0);
++         setDefault("labPreShoot",true);
++         setDefault("labAutoNexus",false);
++         setDefault("labNexusPercent",25);
+          setDefault("disableAllParticles",true);
+          setDefault("uiQuality",false);
+          setDefault("FS",true);
+@@ -362,4 +382,3 @@ package com.company.assembleegameclient.parameters
+       }
+    }
+ }
+-
+diff --git a/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as b/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as
+index e907eb0..3788e10 100644
+--- a/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as
++++ b/com/company/assembleegameclient/ui/options/registry/OptionRegistry.as
+@@ -15,7 +15,7 @@ package com.company.assembleegameclient.ui.options.registry
+       
+       public static const TAB_GAMEPLAY:String = "Gameplay";
+       
+-      public static const TABS:Vector.<String> = new <String>["Controls","Graphics","Sound","Chat","Gameplay"];
++      public static const TABS:Vector.<String> = new <String>["Controls","Graphics","Sound","Chat","Gameplay","Lab"];
+       
+       private var _options:Vector.<OptionDef>;
+       
+@@ -28,6 +28,26 @@ package com.company.assembleegameclient.ui.options.registry
+          buildSound();
+          buildChat();
+          buildGameplay();
++         key("labFollowKey","Toggle follow","Comma: toggle locally on a follower, or send toggle from LeaderPlayer to FollowerOne and FollowerTwo. Ignored while typing.","Lab","Movement",188);
++         key("labTeleportFollowersKey","Teleport followers","Period on LeaderPlayer: request normal teleport from FollowerOne and FollowerTwo. Requires same map, eligible target and no cooldown. Never queued.","Lab","Movement",190);
++         choice("labAbilityMode",new <String>["On keypress","Automatic"],[0,1],"Ability mode","Automatic: target vulnerable enemies in combat, respecting mana/cooldown. No charged or teleport abilities; pauses for manual fire/ability. Can be saved in a settings preset.","Lab","Combat",0);
++         toggle("labFollowLeaderPlayer","Follow LeaderPlayer","FollowerOne and FollowerTwo: follow LeaderPlayer, stop nearby or if blocked by walls/lava. Manual movement takes priority. Profile identity must match.","Lab","Movement",false);
++         toggle("labFollowTeleport","Teleport if stuck","Walk toward LeaderPlayer at any known distance. Only try normal teleport after 8 seconds without moving half a tile, with LeaderPlayer more than 4 tiles away. Respects cooldown and map restrictions; never interrupts manual input or portal transitions.","Lab","Movement",true);
++         toggle("labFollowPortals","Follow portals","Also follow the exact portal used by LeaderPlayer. Requires Follow LeaderPlayer and separate profile launchers. Stops on missing/blocked portal or unconfirmed arrival. Never uses keys.","Lab","Movement",false);
++         toggle("labReduceClientHits","Reduce client hits","Master switch for hit reduction. Does not prevent server, AoE or terrain damage. Choose Adaptive or Always below.","Lab","Safety",false);
++         choice("labReduceHitsMode",new <String>["Adaptive","Always"],[0,1],"Reduce hits mode","Always: original behavior, even at full HP and with players nearby; ignores HP % and alone settings. Adaptive: uses those settings. Requires Reduce client hits ON.","Lab","Safety",0);
++         add(new OptionDef().init("labReduceHitsPercent","Reduce hits HP %","Active strictly below this HP percentage. Minimum/default 75%; maximum 100%.","slider","Lab","Safety").withSlider(75,100,1).withDefault(75));
++         toggle("labReduceHitsAlone","Always reduce when alone","Requires Reduce client hits. With no other loaded players within 15 tiles, reduce even at full HP. With anyone nearby, use the configured HP threshold. Includes followers and visually hidden players. Checked every 100 ms; server/AoE/terrain damage still applies.","Lab","Safety",false);
++         toggle("labAutoLoot","Auto Loot","Pick up eligible nearby gear. HP/MP fill stacks only with room. Use recognized stat potions from the bag: improve stats or Store when maxed and storage has room. Never sells. Stays enabled; backs off on failure.","Lab","Loot",false);
++         choice("labLootGearTier",new <String>["All","T6+","T8+","T10+","T12+","T14+"],[0,6,8,10,12,14],"Weapons / armor minimum","Only filters basic numeric-tier equipment. Special, untiered and consumable items remain eligible.","Lab","Loot",10);
++         choice("labLootAbilityTier",new <String>["All","T2+","T3+","T4+","T5+","T6+"],[0,2,3,4,5,6],"Abilities minimum","Minimum tier for basic abilities; special items are kept.","Lab","Loot",4);
++         choice("labLootRingTier",new <String>["All","T2+","T3+","T4+","T5+","T6+"],[0,2,3,4,5,6],"Rings minimum","Minimum tier for basic rings; special items are kept.","Lab","Loot",4);
++         toggle("labAimAbility","Aim manual ability","You trigger the ability; aim at a vulnerable enemy within 12 tiles, prioritizing quests. Independent of Auto Aim. Falls back to mouse if no valid target. Never casts by itself.","Lab","Combat",true);
++         toggle("labAutoAim","Auto Aim","Automatically fires at enemies within weapon range; disabled in Nexus and Vault. Holding the fire mouse button overrides aim with the cursor; release resumes automatic aiming.","Lab","Combat",false);
++         choice("labAimMode",new <String>["Automatic","15 degree cone"],[0,1],"Aim mode","Prioritizes clear shots within actual weapon range, then quest and maximum HP. Uses the extra 20% range only if no in-range target is available.","Lab","Combat",0);
++         toggle("labPreShoot","Pre-shoot","Keep firing at invulnerable targets.","Lab","Combat",true);
++         toggle("labAutoNexus","Auto Nexus","Escape when observed HP falls below the threshold. Not a survival guarantee.","Lab","Safety",false);
++         choice("labNexusPercent",new <String>["20%","25%","35%","50%"],[20,25,35,50],"HP threshold","Uses the player's current HP and maximum HP.","Lab","Safety",25);
+       }
+       
+       public function get options() : Vector.<OptionDef>
+@@ -242,4 +262,3 @@ package com.company.assembleegameclient.ui.options.registry
+       }
+    }
+ }
+-
+diff --git a/Evershade.as b/Evershade.as
+index 1f0f526..b27e182 100644
+--- a/Evershade.as
++++ b/Evershade.as
+@@ -8,6 +8,13 @@ package
+    import flash.display.LoaderInfo;
+    import flash.display.Sprite;
+    import flash.display.Stage;
++   import flash.desktop.NativeApplication;
++   import flash.display.NativeWindow;
++   import flash.display.Screen;
++   import flash.events.InvokeEvent;
++   import flash.events.UncaughtErrorEvent;
++   import flash.geom.Rectangle;
++   import flash.utils.setTimeout;
+    import flash.events.Event;
+    import flash.events.KeyboardEvent;
+    import flash.events.VsyncStateChangeAvailabilityEvent;
+@@ -75,6 +82,8 @@ package
+       public function Evershade()
+       {
+          super();
++         loaderInfo.uncaughtErrorEvents.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR,this.labAirError,false,100);
++         NativeApplication.nativeApplication.addEventListener(InvokeEvent.INVOKE,this.labInvoke);
+          if(stage)
+          {
+             stage.addEventListener("resize",this.onStageResize,false,0,true);
+@@ -87,6 +96,49 @@ package
+          }
+       }
+       
++      private function labAirError(event:UncaughtErrorEvent) : void
++      {
++         var error:Error = event.error as Error;
++         if(error != null && error.errorID == 2000 && error.message.indexOf("No active security context") >= 0)
++         {
++            trace("[Lab AIR] Known SecurityError #2000: No active security context. Dialog suppressed; cause not fixed.");
++            event.preventDefault();
++         }
++      }
++
++      private function labInvoke(event:InvokeEvent) : void
++      {
++         if(event.arguments.indexOf("--lab-grid") >= 0) setTimeout(this.labArrangeWindow,250);
++      }
++
++      private function labArrangeWindow() : void
++      {
++         var names:Array = ["Evershade.Lab.LeaderPlayer","Evershade.Lab.FollowerOne","Evershade.Lab.FollowerTwo"];
++         var slot:int = names.indexOf(NativeApplication.nativeApplication.applicationID);
++         if(slot < 0 || stage == null || stage.nativeWindow == null) return;
++         var window:NativeWindow = stage.nativeWindow;
++         if(window.displayState != "normal" || stage.displayState != "normal")
++         {
++            trace("[Lab grid] Restore windowed mode first; size left unchanged.");
++            return;
++         }
++         var area:Rectangle = Screen.mainScreen.visibleBounds;
++         var position:Point = labGridPosition(slot,area,window.width,window.height);
++         window.x = position.x;
++         window.y = position.y;
++         trace("[Lab grid] " + names[slot] + " at " + window.x + "," + window.y + " size unchanged " + window.width + "x" + window.height);
++         if(window.width > area.width / 2 || window.height > area.height / 2) trace("[Lab grid] Current size exceeds a quadrant; overlap is unavoidable without resizing.");
++      }
++
++      private static function labGridPosition(slot:int, area:Rectangle, width:Number, height:Number) : Point
++      {
++         var cellWidth:Number = area.width / 2;
++         var cellHeight:Number = area.height / 2;
++         var x:Number = area.x + (slot % 2) * cellWidth + Math.max(0,(cellWidth - width) / 2);
++         var y:Number = area.y + int(slot / 2) * cellHeight + Math.max(0,(cellHeight - height) / 2);
++         return new Point(Math.round(Math.max(area.x,Math.min(x,area.right - width))),Math.round(Math.max(area.y,Math.min(y,area.bottom - height))));
++      }
++
+       public static function setNativeMouseGameplayMode(param1:Boolean) : void
+       {
+          nativeMouseGameplayMode_ = param1;
+diff --git a/kabam/rotmg/messaging/impl/GameServerConnection.as b/kabam/rotmg/messaging/impl/GameServerConnection.as
+index 3a0e897..d95f064 100644
+--- a/kabam/rotmg/messaging/impl/GameServerConnection.as
++++ b/kabam/rotmg/messaging/impl/GameServerConnection.as
+@@ -1,5 +1,6 @@
+ package kabam.rotmg.messaging.impl
+ {
++   import com.company.assembleegameclient.game.MapUserInput;
+    import com.company.assembleegameclient.account.ui.UpgradeSkillTreeFrame;
+    import com.company.assembleegameclient.appengine.SavedCharacter;
+    import com.company.assembleegameclient.game.GameSprite;
+@@ -81,6 +82,9 @@ package kabam.rotmg.messaging.impl
+    import com.hurlant.util.Base64;
+    import com.hurlant.util.der.PEM;
+    import flash.desktop.NativeApplication;
++   import flash.filesystem.File;
++   import flash.filesystem.FileMode;
++   import flash.filesystem.FileStream;
+    import flash.display.Bitmap;
+    import flash.display.BitmapData;
+    import flash.display.Sprite;
+@@ -804,6 +808,8 @@ package kabam.rotmg.messaging.impl
+       
+       public function disconnect() : void
+       {
++         this.labNetworkLog("local_disconnect");
++         MapUserInput.labPortalCancel();
+          this.explodingProjectileHitGroups_ = new Dictionary();
+          this.serverConnection.eraseBulkMessages();
+          this.removeServerConnectionListeners();
+@@ -1429,6 +1435,7 @@ package kabam.rotmg.messaging.impl
+       
+       public function playerHit(param1:int, param2:int, param3:int, param4:Boolean, param5:int, param6:Boolean) : void
+       {
++         this.labHealthEvent("local_hit_report",{bullet:param2,owner:param3,projectile:param4,piercing:param6});
+          var _loc7_:PlayerHit = this.messages.require(34) as PlayerHit;
+          _loc7_.time_ = param1;
+          _loc7_.bulletId_ = param2;
+@@ -1489,6 +1496,7 @@ package kabam.rotmg.messaging.impl
+       
+       public function groundDamage(param1:int, param2:Number, param3:Number) : void
+       {
++         this.labHealthEvent("ground_damage_report",{x:param2,y:param3});
+          var _loc4_:GroundDamage = this.messages.require(33) as GroundDamage;
+          _loc4_.time_ = param1;
+          _loc4_.position_.x_ = param2;
+@@ -1611,6 +1619,7 @@ package kabam.rotmg.messaging.impl
+       
+       public function useItem(param1:int, param2:int, param3:int, param4:int, param5:Number, param6:Number, param7:int) : void
+       {
++         this.labRememberUse(param2,param3,param4,-1);
+          var _loc8_:UseItem = this.messages.require(14) as UseItem;
+          _loc8_.time_ = param1;
+          _loc8_.slotObject_.objectId_ = param2;
+@@ -1622,7 +1631,7 @@ package kabam.rotmg.messaging.impl
+          this.serverConnection.sendMessage(_loc8_);
+       }
+       
+-      public function useItem_new(param1:GameObject, param2:int) : Boolean
++      public function useItem_new(param1:GameObject, param2:int, storeMode:int = -1) : Boolean
+       {
+          var _loc4_:String = null;
+          var _loc5_:XML = null;
+@@ -1630,7 +1639,7 @@ package kabam.rotmg.messaging.impl
+          var _loc8_:Boolean = false;
+          var _loc3_:int = param1.equipment_[param2];
+          var _loc9_:XML = ObjectLibrary.xmlLibrary_[_loc3_];
+-         var _loc7_:int = int(Parameters.data_.sellMaxyPots);
++         var _loc7_:int = storeMode >= 0 ? storeMode : int(Parameters.data_.sellMaxyPots);
+          if(_loc9_ && !param1.isPaused() && (_loc9_.hasOwnProperty("Consumable") || _loc9_.hasOwnProperty("InvUse")))
+          {
+             if(_loc9_.hasOwnProperty("Consumable") && _loc9_.hasOwnProperty("Activate"))
+@@ -1679,6 +1688,7 @@ package kabam.rotmg.messaging.impl
+       
+       private function applyUseItem(param1:GameObject, param2:int, param3:int, param4:XML, param5:int = 0) : void
+       {
++         this.labRememberUse(param1.objectId_,param2,param3,param5);
+          var _loc6_:UseItem = this.messages.require(14) as UseItem;
+          _loc6_.time_ = getTimer();
+          _loc6_.slotObject_.objectId_ = param1.objectId_;
+@@ -1738,6 +1748,7 @@ package kabam.rotmg.messaging.impl
+       
+       public function usePortal(param1:int) : void
+       {
++         MapUserInput.labPortalUsed(this.gs_,param1);
+          var _loc2_:UsePortal = this.messages.require(28) as UsePortal;
+          _loc2_.objectId_ = param1;
+          this.serverConnection.sendMessage(_loc2_);
+@@ -1891,6 +1902,7 @@ package kabam.rotmg.messaging.impl
+       
+       public function escape() : void
+       {
++         MapUserInput.labPortalCancel();
+          if(this.playerId_ == -1)
+          {
+             return;
+@@ -2140,6 +2152,7 @@ package kabam.rotmg.messaging.impl
+       
+       private function onConnected() : void
+       {
++         this.labNetworkLog("connected");
+          var _loc2_:Account = StaticInjectorContext.getInjector().getInstance(Account);
+          var _loc1_:Hello = this.messages.require(16) as Hello;
+          _loc1_.buildVersion_ = "2.1.17";
+@@ -2177,6 +2190,7 @@ package kabam.rotmg.messaging.impl
+       
+       private function onDamage(param1:Damage) : void
+       {
++         if(param1.targetId_ == playerId_) this.labHealthEvent("server_damage",{damage:param1.damageAmount_,owner:param1.objectId_,bullet:param1.bulletId_,kill:param1.kill_,piercing:param1.pierce_});
+          var _loc3_:* = undefined;
+          var _loc4_:* = undefined;
+          if(!Parameters.data_.allyDamage)
+@@ -3201,6 +3215,7 @@ package kabam.rotmg.messaging.impl
+                   param1.maxHP_ = _loc9_;
+                   break;
+                case 1:
++                  if(param1.objectId_ == playerId_) this.labObserveHealth(param1,_loc9_);
+                   param1.hp_ = _loc9_;
+                   param1.rtHp_ = param1.hp_;
+                   if(_loc9_ > 0 && (param1.pendingDeath_ || param1.showDead_ || param1.dead_))
+@@ -3281,6 +3296,7 @@ package kabam.rotmg.messaging.impl
+                   _loc10_.nightfangDamageReduction_ = _loc9_;
+                   break;
+                case 29:
++                  if(param1.objectId_ == playerId_) this.labObserveConditions(param1,0,uint(_loc9_));
+                   param1.condition_[0] = _loc9_;
+                   break;
+                case 199:
+@@ -3909,6 +3925,7 @@ package kabam.rotmg.messaging.impl
+                   _loc10_.upgraded_ = _loc9_ == 1;
+                   break;
+                case 120:
++                  if(param1.objectId_ == playerId_) this.labObserveConditions(param1,1,uint(_loc9_));
+                   param1.condition_[1] = _loc9_;
+                   break;
+                case 121:
+@@ -4121,8 +4138,113 @@ package kabam.rotmg.messaging.impl
+          }
+       }
+       
++      public var labInvResultSequence:int = 0;
++      private var labHealthPlayer_:GameObject = null;
++      private var labHealthTelemetryEnabled_:Boolean = false;
++      private var labServerHP_:int = 0;
++      private var labConditionPlayer_:GameObject = null;
++      private var labServerConditions_:Array = [null,null];
++
++      private function labObserveConditions(object:GameObject, bank:int, value:uint) : void
++      {
++         if(!this.labHealthTelemetryEnabled_) return;
++         if(object != this.labConditionPlayer_)
++         {
++            this.labConditionPlayer_ = object;
++            this.labServerConditions_ = [null,null];
++         }
++         var previous:Object = this.labServerConditions_[bank];
++         if(previous == null || Number(previous) != value)
++         {
++            this.labHealthEvent(previous == null ? "condition_baseline" : "condition_update",{bank:bank,previous:previous,next:value});
++         }
++         this.labServerConditions_[bank] = value;
++      }
++
++      private function labObserveHealth(object:GameObject, hp:int) : void
++      {
++         if(!this.labHealthTelemetryEnabled_) return;
++         var initial:Boolean = object != this.labHealthPlayer_;
++         if(initial || hp != this.labServerHP_)
++         {
++            this.labHealthEvent(initial ? "hp_baseline" : "hp_update",{previous:initial ? null : this.labServerHP_,next:hp,delta:initial ? null : hp - this.labServerHP_,clientBefore:object.hp_});
++         }
++         this.labHealthPlayer_ = object;
++         this.labServerHP_ = hp;
++      }
++
++      private function labHealthEvent(eventName:String, data:Object) : void
++      {
++         if(!this.labHealthTelemetryEnabled_) return;
++         // Evidence only: a nearby event is not proof of the cause of an HP delta.
++         try
++         {
++            var p:Player = this.gs_ != null && this.gs_.map != null ? this.gs_.map.player_ : null;
++            if(p == null) return;
++            var nearby:int = 0;
++            for each(var object:GameObject in this.gs_.map.goDict_)
++            {
++               var other:Player = object as Player;
++               if(other == null || other == p || other.dead_) continue;
++               var dx:Number = other.x_ - p.x_;
++               var dy:Number = other.y_ - p.y_;
++               if(dx * dx + dy * dy <= 225) nearby++;
++            }
++            var settings:Object = Parameters.data_;
++            var threshold:Number = settings != null ? Number(settings.labReduceHitsPercent) : 75;
++            threshold = isFinite(threshold) ? Math.max(75,Math.min(100,threshold)) : 75;
++            var enabled:Boolean = settings != null && settings.labReduceClientHits;
++            var always:Boolean = settings != null && Number(settings.labReduceHitsMode) == 1;
++            var alone:Boolean = settings != null && settings.labReduceHitsAlone;
++            data.v = 2;
++            data.conditions = p.condition_ != null ? [p.condition_[0],p.condition_[1]] : null;
++            data.hp = p.hp_;
++            data.maxHP = p.maxHP_;
++            data.x = Math.round(p.x_ * 100) / 100;
++            data.y = Math.round(p.y_ * 100) / 100;
++            data.nearby = nearby;
++            data.enabled = enabled;
++            data.always = always;
++            data.alone = alone;
++            data.threshold = threshold;
++            // Uncached policy snapshot; collision's nearby cache can differ for up to 100ms.
++            data.policyActive = enabled && (always || (p.maxHP_ > 0 && p.hp_ > 0 && (p.hp_ < p.maxHP_ * threshold / 100 || (alone && nearby == 0))));
++            this.labNetworkLog(eventName,JSON.stringify(data));
++         }
++         catch(error:Error) { trace("[Lab health] Diagnostic failed: " + error.errorID); }
++      }
++      private var labRecentUses_:Array = [];
++      private static var labNetworkFile_:String = "lab-network-" + new Date().time + ".jsonl";
++
++      private function labRememberUse(owner:int, slot:int, type:int, mode:int) : void
++      {
++         this.labRecentUses_.push({ms:getTimer(),owner:owner,slot:slot,type:type,mode:mode});
++         if(this.labRecentUses_.length > 24) this.labRecentUses_.shift();
++      }
++
++      private function labNetworkLog(eventName:String, detail:String = "") : void
++      {
++         var stream:FileStream = null;
++         try
++         {
++            // Explicit fields only: never serialize packets, login or reconnect keys.
++            var record:Object = {time:new Date().time,ms:getTimer(),event:eventName,profile:NativeApplication.nativeApplication.applicationID,map:this.gs_ != null && this.gs_.map != null ? this.gs_.map.name_ : "",gameId:this.gameId_,detail:detail.substr(0,512),invSequence:this.labInvResultSequence,invResult:this.labInvResultCode,recentUses:this.labRecentUses_};
++            var line:String = JSON.stringify(record);
++            trace("[Lab network] " + line);
++            stream = new FileStream();
++            stream.open(File.applicationStorageDirectory.resolvePath(labNetworkFile_),FileMode.APPEND);
++            stream.writeUTFBytes(line + "\n");
++         }
++         catch(error:Error) { trace("[Lab network] Could not persist diagnostic: " + error.errorID); }
++         // Keep cleanup outside finally: JPEXS emits invalid AVM2 for nested catch in finally.
++         if(stream != null) { try { stream.close(); } catch(closeError:Error) {} }
++      }
++      public var labInvResultCode:int = -1;
++
+       private function onInvResult(param1:InvResult) : void
+       {
++         this.labInvResultSequence++;
++         this.labInvResultCode = param1.result_;
+          if(param1.result_ == 2)
+          {
+             SoundEffectLibrary.play("use_potion");
+@@ -4142,6 +4264,8 @@ package kabam.rotmg.messaging.impl
+       
+       private function onReconnect(param1:Reconnect) : void
+       {
++         this.labNetworkLog("server_reconnect","destinationGame=" + param1.gameId_);
++         MapUserInput.labPortalConfirmed(param1.gameId_,param1.host_ != "" ? param1.host_ : this.server_.address,param1.host_ != "" ? param1.port_ : this.server_.port);
+          this.disconnect();
+          var _loc3_:Server = new Server().setName(param1.name_).setAddress(param1.host_ != "" ? param1.host_ : this.server_.address).setPort(param1.host_ != "" ? param1.port_ : this.server_.port);
+          var _loc2_:int = param1.gameId_;
+@@ -4280,6 +4404,7 @@ package kabam.rotmg.messaging.impl
+          if(hit)
+          {
+             d = GameObject.damageWithDefense(aoe.damage_,this.player.defense_,false,this.player.condition_);
++            this.labHealthEvent("aoe_hit",{damage:d,raw:aoe.damage_,radius:aoe.radius_});
+             effects = null;
+             if(aoe.effect_ != 0)
+             {
+@@ -4495,6 +4620,7 @@ package kabam.rotmg.messaging.impl
+       
+       private function onClosed() : void
+       {
++         this.labNetworkLog("socket_closed","No reason provided by close event");
+          var _loc1_:HideMapLoadingSignal = null;
+          if(this.playerId_ != -1)
+          {
+@@ -4534,11 +4660,13 @@ package kabam.rotmg.messaging.impl
+       
+       private function onError(param1:String) : void
+       {
++         this.labNetworkLog("socket_error",param1);
+          this.addTextLine.dispatch(new AddTextLineVO("*Error*",param1));
+       }
+       
+       private function onFailure(param1:Failure) : void
+       {
++         this.labNetworkLog("server_failure","code=" + param1.errorId_ + " " + param1.errorDescription_);
+          switch(param1.errorId_ - 1)
+          {
+             case 0:
+@@ -4942,4 +5070,3 @@ package kabam.rotmg.messaging.impl
+       }
+    }
+ }
+-
